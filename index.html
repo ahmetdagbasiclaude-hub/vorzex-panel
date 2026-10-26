@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vorzex Yönetim</title>
+<!--
+  VORZEX MOBILE yönetici paneli (tarayıcıdan). Oyunun kendi Unity servislerini kullanır; sunucu yok.
+  Giriş: Unity Authentication kullanıcı adı + şifre. Yönetici hesabının kimliği oyundaki
+  Yonetim.Yoneticiler listesinde olmalı (yoksa yasak/duyuru/bakım ayarlarını oyun dikkate almaz).
+  Veri (Cloud Save, herkese açık):
+    oyuncular  "oy_*"   (her oyuncu kendisi yazar, 2 dk'da bir; "oy_son" sorgu dizini)
+    yönetici   "yon_yasak"  {"<oyuncuId>": {"b": bitiş unix (0 kalıcı), "n": neden, "z": verildiği an}}
+               "yon_ayar"   {"duyuru": {"metin", "z", "bitis"}, "bakim": {"acik", "mesaj"}, "minSurum", "surumMesaj"}
+  Oyun bu iki kaydı 2 dk'da bir okur. Bu dosyada şifre ya da gizli anahtar yoktur.
+-->
+<style>
+:root {
+  --bg: #f4f6fa; --panel: #ffffff; --panel2: #eef1f6; --text: #141a24; --soluk: #5d6878; --kenar: #d8dee8; --cizgi: #e6eaf1;
+  --altin: #9a6508; --mavi: #1f6fe0; --grafik: #1f6fe0; --yesil: #1c8a45; --kirmizi: #c53b30; --turuncu: #b45f14; --satir: #f8f9fc;
+  --golge: 0 10px 40px rgba(16, 24, 40, .18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0f17; --panel: #131a26; --panel2: #1a2333; --text: #e8edf5; --soluk: #8e9bb0; --kenar: #263247; --cizgi: #1f2938;
+    --altin: #f2c14e; --mavi: #4c95ff; --grafik: #3d86f0; --yesil: #4fd27c; --kirmizi: #ff6b5e; --turuncu: #ff9a52; --satir: #161e2c;
+    --golge: 0 10px 40px rgba(0, 0, 0, .5);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0f17; --panel: #131a26; --panel2: #1a2333; --text: #e8edf5; --soluk: #8e9bb0; --kenar: #263247; --cizgi: #1f2938;
+  --altin: #f2c14e; --mavi: #4c95ff; --grafik: #3d86f0; --yesil: #4fd27c; --kirmizi: #ff6b5e; --turuncu: #ff9a52; --satir: #161e2c;
+  --golge: 0 10px 40px rgba(0, 0, 0, .5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.kap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+h1 { font-size: 21px; margin: 0; letter-spacing: .5px; color: var(--altin); }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.bos { flex: 1; }
+.durum { color: var(--soluk); font-size: 13px; }
+.hata { color: var(--kirmizi); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { border: 1px solid var(--kenar); background: var(--panel2); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+button:hover { border-color: var(--mavi); }
+button.ana { background: var(--mavi); border-color: var(--mavi); color: #fff; }
+button.tehlike { color: var(--kirmizi); }
+button.tehlike.dolu { background: var(--kirmizi); border-color: var(--kirmizi); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+input, select, textarea { border: 1px solid var(--kenar); background: var(--panel); padding: 9px 12px; border-radius: 8px; width: 100%; }
+textarea { resize: vertical; min-height: 80px; }
+label { display: grid; gap: 6px; font-size: 13px; color: var(--soluk); }
+.kart { background: var(--panel); border: 1px solid var(--kenar); border-radius: 12px; padding: 18px; }
+.giris { max-width: 420px; margin: 8vh auto 0; display: grid; gap: 12px; }
+.not { color: var(--soluk); font-size: 13px; }
+.sekmeler { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.sekmeler button.secili { background: var(--mavi); color: #fff; border-color: var(--mavi); }
+.ozet { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ozet .kart span { color: var(--soluk); font-size: 12px; letter-spacing: .6px; text-transform: uppercase; }
+.ozet .kart b { display: block; font-size: 32px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.grafikler { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 12px; }
+@media (max-width: 560px) { .grafikler { grid-template-columns: 1fr; } }
+.grafik-bas { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.grafik-bas h2 { margin: 0; }
+.grafik-bas .bos + button { padding: 4px 10px; font-size: 12px; }
+.grafik { position: relative; }
+.grafik svg { display: block; width: 100%; height: 200px; overflow: visible; }
+.grafik .ipucu { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--kenar); box-shadow: var(--golge);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px; white-space: nowrap; transform: translate(-50%, -110%); }
+.grafik .ipucu b { font-variant-numeric: tabular-nums; }
+.tablo-kap { overflow-x: auto; border: 1px solid var(--kenar); border-radius: 12px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; }
+.genis table { min-width: 980px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--cizgi); white-space: nowrap; }
+th { font-size: 12px; color: var(--soluk); letter-spacing: .5px; text-transform: uppercase; user-select: none; position: sticky; top: 0; background: var(--panel); }
+th[data-k] { cursor: pointer; }
+tbody tr { cursor: pointer; }
+tbody tr:nth-child(even) { background: var(--satir); }
+tbody tr:hover { outline: 1px solid var(--mavi); outline-offset: -1px; }
+tr.yasakli td:first-child { box-shadow: inset 3px 0 0 var(--kirmizi); }
+td.sayi, th.sayi { text-align: right; font-variant-numeric: tabular-nums; }
+.no { color: var(--altin); font-variant-numeric: tabular-nums; }
+.etiket { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.etiket i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.etiket.cevrimici i { background: var(--yesil); }
+.etiket.yasak { color: var(--kirmizi); }
+.etiket.yasak i { background: var(--kirmizi); }
+.hile { color: var(--turuncu); }
+.arac { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.arac input { max-width: 340px; }
+.kimlik { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--soluk); margin-bottom: 14px; }
+code { background: var(--panel2); padding: 2px 6px; border-radius: 6px; color: var(--text); font-size: 12px; }
+.uyari { border-left: 3px solid var(--altin); padding: 10px 14px; background: var(--panel); border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
+.uyari.kirmizi { border-left-color: var(--kirmizi); }
+.ayarlar { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.ayarlar .kart { display: grid; gap: 12px; align-content: start; }
+.satirlar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.anahtar { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text); font-size: 15px; }
+.anahtar input { width: auto; }
+.gizli { display: none !important; }
+dialog { border: 1px solid var(--kenar); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(640px, calc(100vw - 32px)); box-shadow: var(--golge); }
+dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.diyalog { padding: 20px; display: grid; gap: 14px; }
+.diyalog .ust { display: flex; align-items: center; gap: 10px; }
+.diyalog .ust h2 { margin: 0; flex: 1; }
+dl { display: grid; grid-template-columns: 150px 1fr; gap: 8px 14px; margin: 0; }
+dt { color: var(--soluk); font-size: 13px; }
+dd { margin: 0; overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--kenar); box-shadow: var(--golge);
+  border-radius: 10px; padding: 10px 16px; font-size: 14px; z-index: 10; }
+</style>
+</head>
+<body>
+<div class="kap">
+  <header>
+    <h1>VORZEX · YÖNETİM</h1>
+    <div class="bos"></div>
+    <span id="durum" class="durum"></span>
+    <button id="yenile" class="gizli">Yenile</button>
+    <button id="cikis" class="gizli">Çıkış</button>
+    <button id="tema" title="Açık / koyu tema" aria-label="Tema">◐</button>
+  </header>
+
+  <form id="girisForm" class="kart giris">
+    <h2>Yönetici girişi</h2>
+    <input id="kad" placeholder="Kullanıcı adı" autocomplete="username" required>
+    <input id="sifre" type="password" placeholder="Şifre" autocomplete="current-password" required>
+    <button class="ana" type="submit">Giriş</button>
+    <button id="kayitOl" type="button">İlk kez: bu bilgilerle hesap oluştur</button>
+    <div id="girisHata" class="not hata"></div>
+    <div class="not">Kullanıcı adı 3-20 karakter (İngilizce harf, rakam, . - @ _); şifre 8-30 karakter, en az bir büyük harf, küçük harf, rakam ve sembol.</div>
+  </form>
+
+  <main id="panel" class="gizli">
+    <div class="kimlik">Yönetici kimliğin: <code id="benimId"></code> <button id="kopyala" type="button">Kopyala</button></div>
+    <div id="hataKutu" class="uyari kirmizi gizli"></div>
+    <div id="durumKutu"></div>
+    <nav class="sekmeler" id="sekmeler"></nav>
+    <section id="icerik"></section>
+  </main>
+</div>
+
+<dialog id="detay"><div class="diyalog" id="detayIc"></div></dialog>
+<dialog id="yasakDiyalog"><form class="diyalog" id="yasakForm" method="dialog"></form></dialog>
+
+<script>
+"use strict";
+const PROJE = "afc217db-b47d-479e-b704-e2decc072e1e", ORTAM = "production";
+const AUTH = "https://player-auth.services.api.unity.com/v1/authentication/usernamepassword/";
+const SAVE = `https://cloud-save.services.api.unity.com/v1/data/projects/${PROJE}/players`;
+const ANAHTARLAR = ["oy_ad", "oy_no", "oy_sv", "oy_para", "oy_elmas", "oy_ilk", "oy_son", "oy_yer", "oy_hile", "oy_hile_not", "oy_surum", "oy_gunler", "oy_klan", "oy_sure"];
+const CEVRIMICI_SN = 300, GUN_SN = 86400, TR = 3 * 3600; // gün numarası Türkiye saatine göre (oyunla aynı)
+
+let token = null, benId = null, oyuncular = [], yasaklar = {}, ayar = {}, sekme = "ozet", arama = "", baglanti = "hepsi", siralama = { alan: "son", ters: true };
+const $ = id => document.getElementById(id);
+const simdi = () => Math.floor(Date.now() / 1000);
+const gunNo = t => Math.floor((t + TR) / GUN_SN);
+const sayi = v => (v || 0).toLocaleString("tr-TR");
+const kacis = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tarih = t => t ? new Date(t * 1000).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" }) : "-";
+function once(t) {
+  if (!t) return "-";
+  const f = simdi() - t;
+  return f < 3600 ? `${Math.max(1, Math.floor(f / 60))} dk önce` : f < GUN_SN ? `${Math.floor(f / 3600)} saat önce` : `${Math.floor(f / GUN_SN)} gün önce`;
+}
+// Oynama süresi: "12 sa 40 dk".
+const oynama = sn => !sn ? "-" : sn < 3600 ? `${Math.max(1, Math.floor(sn / 60))} dk` : `${Math.floor(sn / 3600)} sa ${Math.floor((sn % 3600) / 60)} dk`;
+function sure(sn) {
+  if (sn <= 0) return "doldu";
+  const g = Math.floor(sn / GUN_SN), s = Math.floor((sn % GUN_SN) / 3600), d = Math.floor((sn % 3600) / 60);
+  return g ? `${g} gün ${s} saat` : s ? `${s} saat ${d} dk` : `${Math.max(1, d)} dk`;
+}
+function toast(m) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = m; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+// ---- Tema ----
+try { const t = localStorage.getItem("vx_tema"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("tema").onclick = () => {
+  const koyu = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() === "#0b0f17";
+  document.documentElement.dataset.theme = koyu ? "light" : "dark";
+  try { localStorage.setItem("vx_tema", document.documentElement.dataset.theme); } catch (e) {}
+  ciz();
+};
+
+// ---- Giriş ----
+async function girisYap(yol) {
+  $("girisHata").textContent = "";
+  let r, j;
+  try {
+    r = await fetch(AUTH + yol, { method: "POST", headers: { "Content-Type": "application/json", "ProjectId": PROJE, "UnityEnvironment": ORTAM },
+      body: JSON.stringify({ username: $("kad").value.trim(), password: $("sifre").value }) });
+    j = await r.json().catch(() => ({}));
+  } catch (e) { $("girisHata").textContent = "Bağlanılamadı: internetini kontrol et."; return; }
+  if (!r.ok) {
+    const m = `${j.detail || ""} ${j.title || ""}`;
+    $("girisHata").textContent =
+      /provider is not available/i.test(m) ? "Kullanıcı adı/şifre girişi kapalı: Dashboard > Authentication > Identity providers > Username & Password'ü aç."
+      : /WRONG_USERNAME_PASSWORD|Invalid username/i.test(m) ? "Kullanıcı adı ya da şifre yanlış. Hesabın yoksa \"İlk kez: bu bilgilerle hesap oluştur\" düğmesine bas."
+      : /USERNAME_TAKEN|already/i.test(m) ? "Bu kullanıcı adı alınmış: başka bir ad dene ya da şifrenle Giriş yap."
+      : /Username does not match/i.test(m) ? "Kullanıcı adında izin verilmeyen karakter var (Türkçe harf, boşluk olmasın)."
+      : /password/i.test(m) && yol === "sign-up" ? "Şifre uygun değil: 8-30 karakter, büyük harf, küçük harf, rakam ve sembol içermeli."
+      : (yol === "sign-in" ? "Giriş olmadı: " : "Hesap oluşturulamadı: ") + m.trim();
+    return;
+  }
+  token = j.idToken; benId = j.userId;
+  try { sessionStorage.setItem("vx_oturum", JSON.stringify({ token, benId, bitis: Date.now() + (j.expiresIn || 3500) * 1000 })); } catch (e) {}
+  paneliAc();
+}
+$("girisForm").onsubmit = e => { e.preventDefault(); girisYap("sign-in"); };
+$("kayitOl").onclick = () => { if ($("girisForm").reportValidity()) girisYap("sign-up"); };
+$("cikis").onclick = () => { try { sessionStorage.removeItem("vx_oturum"); } catch (e) {} location.reload(); };
+$("kopyala").onclick = () => { navigator.clipboard && navigator.clipboard.writeText(benId); toast("Kimlik kopyalandı."); };
+$("yenile").onclick = () => yukle();
+
+function paneliAc() {
+  for (const id of ["girisForm"]) $(id).classList.add("gizli");
+  for (const id of ["panel", "yenile", "cikis"]) $(id).classList.remove("gizli");
+  $("benimId").textContent = benId;
+  sekmeleriCiz();
+  yukle();
+}
+try {
+  const o = JSON.parse(sessionStorage.getItem("vx_oturum") || "null");
+  if (o && o.bitis > Date.now()) { token = o.token; benId = o.benId; paneliAc(); }
+} catch (e) {}
+
+// ---- Veri ----
+async function istek(url, secenek = {}) {
+  const r = await fetch(url, { ...secenek, headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token } });
+  if (r.status === 401) { try { sessionStorage.removeItem("vx_oturum"); } catch (e) {} throw new Error("Oturum süresi doldu: sayfayı yenileyip yeniden giriş yap."); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${j.detail || j.title || r.statusText || "hata"}`);
+  return j;
+}
+
+async function yukle() {
+  $("durum").textContent = "Yükleniyor...";
+  hataGoster("");
+  try {
+    const liste = [];
+    for (let sayfa = 0; sayfa < 20; sayfa++) {
+      const j = await istek(`${SAVE}/public/query`, { method: "POST", body: JSON.stringify({
+        fields: [{ key: "oy_son", value: "0", op: "GT", asc: false }], returnKeys: ANAHTARLAR, offset: sayfa * 100, limit: 100 }) });
+      const sonuc = j.results || [];
+      for (const e of sonuc) liste.push(ozet(e));
+      if (sonuc.length < 100) break;
+    }
+    oyuncular = liste;
+    await yonetimKaydiniOku();
+    $("durum").textContent = "Son güncelleme " + new Date().toLocaleTimeString("tr-TR");
+  } catch (e) {
+    $("durum").textContent = "";
+    hataGoster(/index/i.test(e.message) ? "Cloud Save'de \"oy_son\" sorgu dizini yok: Dashboard > Cloud Save > Dizinleri Yapılandır (Oyuncular, Genel, oy_son)." : e.message);
+  }
+  ciz();
+}
+
+function ozet(e) {
+  const d = {};
+  for (const o of e.data || []) d[o.key] = o.value;
+  const n = k => parseInt(d[k], 10) || 0;
+  return { id: e.id, ad: d.oy_ad || "(adsız)", no: d.oy_no || "", sv: n("oy_sv"), para: n("oy_para"), elmas: n("oy_elmas"),
+    ilk: n("oy_ilk"), son: n("oy_son"), yer: d.oy_yer || "", hile: n("oy_hile"), hileNot: d.oy_hile_not || "",
+    surum: n("oy_surum"), klan: d.oy_klan || "", sure: n("oy_sure"), gunler: String(d.oy_gunler || "").split(",").map(x => parseInt(x, 10)).filter(x => x > 0) };
+}
+
+// Yasak listesi: yeni biçim JSON nesnesi; eski biçim virgüllü kimlikler (kalıcı sayılır).
+function yasakCoz(v) {
+  if (!v) return {};
+  if (typeof v === "object") return v;
+  const s = String(v).trim();
+  if (s.startsWith("{")) { try { return JSON.parse(s); } catch (e) { return {}; } }
+  const o = {}; for (const id of s.split(",").map(x => x.trim()).filter(Boolean)) o[id] = { b: 0, n: "", z: 0 }; return o;
+}
+const yasakAktif = y => !!y && (!y.b || y.b > simdi());
+const yasagi = id => yasakAktif(yasaklar[id]) ? yasaklar[id] : null;
+
+async function yonetimKaydiniOku() {
+  const j = await istek(`${SAVE}/${benId}/public/items?keys=yon_yasak&keys=yon_ayar`);
+  const d = {}; for (const o of j.results || []) d[o.key] = o.value;
+  yasaklar = yasakCoz(d.yon_yasak);
+  try { ayar = typeof d.yon_ayar === "object" ? d.yon_ayar || {} : JSON.parse(d.yon_ayar || "{}"); } catch (e) { ayar = {}; }
+}
+async function yaz(anahtar, deger) {
+  await istek(`${SAVE}/${benId}/public/items`, { method: "POST", body: JSON.stringify({ key: anahtar, value: JSON.stringify(deger) }) });
+}
+
+async function yasakKaydet(id, kayit) {
+  await yonetimKaydiniOku(); // başka cihazdan değişmiş olabilir
+  const yeni = {};
+  for (const [k, v] of Object.entries(yasaklar)) if (yasakAktif(v)) yeni[k] = v; // süresi dolanlar temizlenir
+  if (kayit) yeni[id] = kayit; else delete yeni[id];
+  await yaz("yon_yasak", yeni);
+  yasaklar = yeni;
+}
+async function ayarKaydet(degisim) {
+  await yonetimKaydiniOku();
+  ayar = { ...ayar, ...degisim };
+  await yaz("yon_ayar", ayar);
+}
+
+function hataGoster(m) { $("hataKutu").textContent = m; $("hataKutu").classList.toggle("gizli", !m); }
+
+// ---- Çizim ----
+const SEKMELER = [["ozet", "Özet"], ["oyuncular", "Oyuncular"], ["hile", "Hile şüphelileri"], ["yasakli", "Yasaklılar"], ["jeton", "Jeton (Elmas)"], ["ayar", "Duyuru · Bakım · Sürüm"]];
+function sekmeleriCiz() {
+  $("sekmeler").innerHTML = "";
+  for (const [k, ad] of SEKMELER) {
+    const b = document.createElement("button");
+    b.textContent = ad;
+    b.className = sekme === k ? "secili" : "";
+    b.onclick = () => { sekme = k; arama = ""; sekmeleriCiz(); ciz(); };
+    $("sekmeler").appendChild(b);
+  }
+}
+
+function durumKutusu() {
+  const p = [];
+  if (ayar.bakim && ayar.bakim.acik) p.push(`<div class="uyari kirmizi"><b>Bakım modu açık:</b> oyuncular oyuna giremiyor. ${kacis(ayar.bakim.mesaj || "")}</div>`);
+  if (ayar.duyuru && ayar.duyuru.metin && ayar.duyuru.bitis > simdi()) p.push(`<div class="uyari"><b>Yayındaki duyuru</b> (${sure(ayar.duyuru.bitis - simdi())} kaldı): ${kacis(ayar.duyuru.metin)}</div>`);
+  if (ayar.minSurum) p.push(`<div class="uyari">En düşük sürüm: <b>${ayar.minSurum}</b> — daha eski sürümdekiler güncelleme ekranı görür.</div>`);
+  $("durumKutu").innerHTML = p.join("");
+}
+
+function ciz() {
+  durumKutusu();
+  const ic = $("icerik");
+  if (sekme === "ozet") return ozetCiz(ic);
+  if (sekme === "ayar") return ayarCiz(ic);
+  let liste = oyuncular, baslik = "";
+  if (sekme === "hile") { liste = oyuncular.filter(p => p.hile > 0); baslik = `<div class="uyari">Oyunun kendi bildirdiği şüpheli olaylar (para kaydı/belleği değiştirilmiş, anormal hız, yöneticisiz uçuş). Kesin kanıt değildir: incele, sonra yasakla.</div>`; }
+  if (sekme === "yasakli") { liste = oyuncular.filter(p => yasagi(p.id)); baslik = ""; }
+  if (sekme === "jeton") { liste = oyuncular.filter(p => p.elmas > 0); baslik = `<div class="uyari">Jeton = Elmas. Gerçek parayla elmas satışı (Google Play faturalandırması) kurulunca kimin ne zaman kaç elmas aldığı burada listelenecek. Şimdilik elması olanlar:</div>`; }
+  tabloCiz(ic, liste, baslik);
+}
+
+function ozetCiz(ic) {
+  const bugun = gunNo(simdi());
+  const kartlar = [
+    ["Toplam kayıtlı oyuncu", oyuncular.length],
+    ["Şu an çevrimiçi", oyuncular.filter(p => simdi() - p.son < CEVRIMICI_SN).length],
+    ["Şu an haritada", oyuncular.filter(p => simdi() - p.son < CEVRIMICI_SN && p.yer === "harita").length],
+    ["Bugün oynayan", oyuncular.filter(p => gunNo(p.son) === bugun).length],
+    ["Son 7 günde oynayan", oyuncular.filter(p => bugun - gunNo(p.son) < 7).length],
+    ["Son 7 günde yeni", oyuncular.filter(p => p.ilk && bugun - gunNo(p.ilk) < 7).length],
+    ["Hile şüphelisi", oyuncular.filter(p => p.hile > 0).length],
+    ["Yasaklı", oyuncular.filter(p => yasagi(p.id)).length],
+    ["Toplam oynama", null, oynama(oyuncular.reduce((t, p) => t + p.sure, 0))],
+    ["Oyunculardaki para (₺)", oyuncular.reduce((t, p) => t + p.para, 0)],
+  ];
+  // Son 30 gün: günlük aktif (oyuncuların oynadığı günler) ve yeni oyuncu.
+  const gunler = [...Array(30)].map((_, i) => bugun - 29 + i);
+  const aktif = gunler.map(g => oyuncular.filter(p => p.gunler.includes(g) || gunNo(p.son) === g).length);
+  const yeni = gunler.map(g => oyuncular.filter(p => p.ilk && gunNo(p.ilk) === g).length);
+  ic.innerHTML = `<div class="ozet">${kartlar.map(([a, v, m]) => `<div class="kart"><span>${a}</span><b>${m ?? sayi(v)}</b></div>`).join("")}</div>
+    <div class="grafikler">
+      ${grafikKarti("aktif", "Günlük aktif oyuncu", "son 30 gün")}
+      ${grafikKarti("yeni", "Yeni oyuncu", "son 30 gün")}
+    </div>
+    <p class="not">Çevrimiçi: son 5 dakikada oyunu açık olanlar. Liste ve grafikler oyunun yönetim kaydı içeren sürümünü en az bir kez açmış oyuncuları kapsar.</p>`;
+  sutunGrafigi($("g_aktif"), gunler, aktif, "oyuncu");
+  sutunGrafigi($("g_yeni"), gunler, yeni, "yeni oyuncu");
+}
+function grafikKarti(id, ad, alt) {
+  return `<div class="kart"><div class="grafik-bas"><h2>${ad}</h2><span class="durum">${alt}</span><span class="bos"></span>
+    <button type="button" onclick="this.closest('.kart').querySelector('.tablo-gorunum').classList.toggle('gizli')">Tablo</button></div>
+    <div class="grafik" id="g_${id}"></div><div class="tablo-gorunum gizli"></div></div>`;
+}
+const gunAdi = g => new Date(g * GUN_SN * 1000 - TR * 1000 + 12 * 3600 * 1000).toLocaleDateString("tr-TR", { day: "numeric", month: "short" });
+
+// Sütun grafiği: tek seri (gösterge kutusu yok, başlık adlandırır), ince sütunlar, sütun arası 2 px,
+// üst köşeler 4 px yuvarlak, sade ızgara; üzerine gelince değer balonu; tablo görünümü ayrıca.
+function sutunGrafigi(kap, gunler, degerler, birim) {
+  const W = 600, H = 200, sol = 30, alt = 22, ust = 8;
+  const enCok = Math.max(1, ...degerler);
+  const adim = Math.max(1, Math.ceil(enCok / 4));
+  const tepe = adim * Math.ceil(enCok / adim);
+  const gw = (W - sol) / gunler.length, bw = Math.max(2, gw - 2);
+  const y = v => ust + (H - alt - ust) * (1 - v / tepe);
+  let s = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${birim} sayısı, son 30 gün">`;
+  for (let v = 0; v <= tepe; v += adim)
+    s += `<line x1="${sol}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--cizgi)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+          <text x="${sol - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--soluk)">${v}</text>`;
+  degerler.forEach((v, i) => {
+    const x = sol + i * gw + 1, h = (H - alt - ust) * (v / tepe), yy = H - alt - h;
+    if (v > 0) {
+      const r = Math.min(4, bw / 2, h);
+      s += `<path d="M${x},${H - alt} V${yy + r} Q${x},${yy} ${x + r},${yy} H${x + bw - r} Q${x + bw},${yy} ${x + bw},${yy + r} V${H - alt} Z" fill="var(--grafik)"/>`;
+    }
+    if (i % 5 === 4 || i === degerler.length - 1) s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--soluk)">${gunAdi(gunler[i])}</text>`;
+    s += `<rect class="isabet" data-i="${i}" x="${sol + i * gw}" y="0" width="${gw}" height="${H - alt}" fill="transparent"/>`;
+  });
+  s += `</svg><div class="ipucu gizli"></div>`;
+  kap.innerHTML = s;
+  const ipucu = kap.querySelector(".ipucu");
+  kap.querySelectorAll(".isabet").forEach(r => {
+    r.onmouseenter = () => {
+      const i = +r.dataset.i, kutu = kap.getBoundingClientRect(), rk = r.getBoundingClientRect();
+      ipucu.innerHTML = `${gunAdi(gunler[i])} · <b>${sayi(degerler[i])}</b> ${birim}`;
+      ipucu.style.left = (rk.left - kutu.left + rk.width / 2) + "px";
+      ipucu.style.top = (y(degerler[i]) / H * kutu.height) + "px";
+      ipucu.classList.remove("gizli");
+    };
+    r.onmouseleave = () => ipucu.classList.add("gizli");
+  });
+  kap.nextElementSibling.innerHTML = `<div class="tablo-kap" style="margin-top:10px;max-height:240px"><table><thead><tr><th>Gün</th><th class="sayi">${birim}</th></tr></thead><tbody>${
+    gunler.map((g, i) => `<tr><td>${gunAdi(g)}</td><td class="sayi">${sayi(degerler[i])}</td></tr>`).reverse().join("")}</tbody></table></div>`;
+}
+
+function tabloCiz(ic, liste, baslik) {
+  const cevrimici = p => simdi() - p.son < CEVRIMICI_SN;
+  if (baglanti === "acik") liste = liste.filter(cevrimici); else if (baglanti === "kapali") liste = liste.filter(p => !cevrimici(p));
+  const a = arama.trim().toLocaleLowerCase("tr-TR");
+  if (a) liste = liste.filter(p => p.ad.toLocaleLowerCase("tr-TR").includes(a) || p.no.includes(a) || p.id.toLowerCase().includes(a) || p.klan.toLocaleLowerCase("tr-TR").includes(a));
+  const { alan, ters } = siralama;
+  liste = [...liste].sort((x, y) => (typeof x[alan] === "string" ? x[alan].localeCompare(y[alan], "tr") : (x[alan] || 0) - (y[alan] || 0)) * (ters ? -1 : 1));
+  const sutunlar = [["ad", "Ad"], ["no", "Numara"], ["klan", "Klan"], ["sv", "Sv", 1], ["para", "₺", 1], ["elmas", "Elmas", 1], ["sure", "Oynama", 1], ["son", "Son görülme"], ["hile", "Hile", 1], ["surum", "Sürüm", 1]];
+  ic.innerHTML = `${baslik}<div class="arac"><input id="ara" placeholder="Ad, numara, klan ya da kimlik ara..." value="${kacis(arama)}">
+      <span class="satirlar">${[["hepsi", "Hepsi"], ["acik", "Çevrimiçi"], ["kapali", "Çevrimdışı"]].map(([k, ad]) => `<button type="button" data-b="${k}" class="${baglanti === k ? "ana" : ""}">${ad}</button>`).join("")}</span>
+      <span class="durum">${sayi(liste.length)} oyuncu · ₺ ${sayi(liste.reduce((t, p) => t + p.para, 0))} · ${oynama(liste.reduce((t, p) => t + p.sure, 0))} oynama</span><span class="bos"></span><button id="csv" type="button">Excel'e indir (CSV)</button></div>
+    <div class="tablo-kap genis"><table><thead><tr>${sutunlar.map(([k, ad, s]) => `<th data-k="${k}" class="${s ? "sayi" : ""}">${ad}${alan === k ? (ters ? " ▾" : " ▴") : ""}</th>`).join("")}</tr></thead>
+    <tbody>${liste.map(p => {
+      const y = yasagi(p.id), c = simdi() - p.son < CEVRIMICI_SN;
+      const son = y ? `<span class="etiket yasak"><i></i>yasaklı${y.b ? " · " + sure(y.b - simdi()) : ""}</span>`
+        : c ? `<span class="etiket cevrimici"><i></i>${p.yer === "harita" ? "çevrimiçi · haritada" : "çevrimiçi · lobide"}</span>` : once(p.son);
+      return `<tr data-id="${p.id}" class="${y ? "yasakli" : ""}"><td>${kacis(p.ad)}</td><td class="no">${kacis(p.no)}</td><td>${kacis(p.klan)}</td><td class="sayi">${p.sv}</td>
+        <td class="sayi">${sayi(p.para)}</td><td class="sayi">${sayi(p.elmas)}</td><td class="sayi">${oynama(p.sure)}</td><td>${son}</td><td class="sayi ${p.hile ? "hile" : ""}">${p.hile || ""}</td><td class="sayi">${p.surum || ""}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+  const ara = $("ara");
+  ara.oninput = () => { arama = ara.value; const pos = ara.selectionStart; ciz(); const yeni = $("ara"); yeni.focus(); yeni.setSelectionRange(pos, pos); };
+  ic.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => { const k = th.dataset.k; siralama = { alan: k, ters: siralama.alan === k ? !siralama.ters : true }; ciz(); });
+  ic.querySelectorAll("tbody tr").forEach(tr => tr.onclick = () => detayAc(tr.dataset.id));
+  $("csv").onclick = () => csvIndir(liste);
+  ic.querySelectorAll("button[data-b]").forEach(b => b.onclick = () => { baglanti = b.dataset.b; ciz(); });
+}
+
+function csvIndir(liste) {
+  const bas = ["Kimlik", "Ad", "Numara", "Klan", "Seviye", "Para", "Elmas", "Oynama (saat)", "İlk giriş", "Son görülme", "Yer", "Hile", "Son şüphe", "Sürüm", "Yasak"];
+  const satir = p => { const y = yasagi(p.id); return [p.id, p.ad, p.no, p.klan, p.sv, p.para, p.elmas, (p.sure / 3600).toFixed(1).replace(".", ","), tarih(p.ilk), tarih(p.son), p.yer, p.hile, p.hileNot, p.surum,
+    y ? (y.b ? "bitiş " + tarih(y.b) : "kalıcı") + (y.n ? " · " + y.n : "") : ""]; };
+  const hucre = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const metin = "﻿" + [bas, ...liste.map(satir)].map(r => r.map(hucre).join(";")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([metin], { type: "text/csv;charset=utf-8" }));
+  a.download = `vorzex-oyuncular-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function detayAc(id) {
+  const p = oyuncular.find(o => o.id === id); if (!p) return;
+  const y = yasagi(p.id), son30 = p.gunler.filter(g => gunNo(simdi()) - g < 30).length;
+  $("detayIc").innerHTML = `<div class="ust"><h2>${kacis(p.ad)} <span class="no">${kacis(p.no)}</span></h2><button type="button" id="detayKapat">Kapat</button></div>
+    ${y ? `<div class="uyari kirmizi">Yasaklı: ${y.b ? sure(y.b - simdi()) + " kaldı (" + tarih(y.b) + ")" : "kalıcı"}${y.n ? " · Neden: " + kacis(y.n) : ""}${y.z ? " · Verildi: " + tarih(y.z) : ""}</div>` : ""}
+    <dl>
+      <dt>Hesap kimliği</dt><dd><code>${kacis(p.id)}</code></dd>
+      <dt>Klan</dt><dd>${kacis(p.klan) || "-"}</dd>
+      <dt>Seviye</dt><dd>${p.sv}</dd>
+      <dt>Para / Elmas</dt><dd>₺ ${sayi(p.para)} · ${sayi(p.elmas)} elmas</dd>
+      <dt>Toplam oynama</dt><dd>${oynama(p.sure)}</dd>
+      <dt>İlk giriş</dt><dd>${tarih(p.ilk)}</dd>
+      <dt>Son görülme</dt><dd>${tarih(p.son)} (${once(p.son)}${simdi() - p.son < CEVRIMICI_SN ? ", " + (p.yer === "harita" ? "haritada" : "lobide") : ""})</dd>
+      <dt>Son 30 günde</dt><dd>${son30} gün oynadı</dd>
+      <dt>Sürüm</dt><dd>${p.surum || "-"}</dd>
+      <dt>Hile şüphesi</dt><dd class="${p.hile ? "hile" : ""}">${p.hile ? `${p.hile} olay · son: ${kacis(p.hileNot)}` : "yok"}</dd>
+    </dl>
+    <div class="satirlar">${p.id === benId ? "" : y ? `<button type="button" id="yasakKaldir" class="ana">Yasağı kaldır</button>` : `<button type="button" id="yasakla" class="tehlike dolu">Yasakla...</button>`}</div>`;
+  $("detayKapat").onclick = () => $("detay").close();
+  if ($("yasakKaldir")) $("yasakKaldir").onclick = async () => {
+    try { await yasakKaydet(p.id, null); toast(`${p.ad} yasağı kaldırıldı.`); } catch (e) { hataGoster("Yazılamadı: " + e.message); }
+    $("detay").close(); ciz();
+  };
+  if ($("yasakla")) $("yasakla").onclick = () => { $("detay").close(); yasakDiyalogu(p); };
+  $("detay").showModal();
+}
+
+function yasakDiyalogu(p) {
+  $("yasakForm").innerHTML = `<div class="ust"><h2>Yasakla: ${kacis(p.ad)} <span class="no">${kacis(p.no)}</span></h2></div>
+    <label>Süre<select id="ySure"><option value="86400">1 gün</option><option value="259200">3 gün</option><option value="604800" selected>7 gün</option>
+      <option value="2592000">30 gün</option><option value="0">Kalıcı</option></select></label>
+    <label>Neden (oyuncu görür)<input id="yNeden" maxlength="120" value="${p.hile ? "Hile şüphesi" : ""}" placeholder="ör. Hile, küfür, hata kötüye kullanımı"></label>
+    <div class="not">Oyuncu en geç 2 dakika içinde oyundan atılır; süre dolunca kendiliğinden açılır.</div>
+    <div class="satirlar"><button value="iptal">Vazgeç</button><button value="tamam" class="tehlike dolu">Yasakla</button></div>`;
+  $("yasakDiyalog").onclose = async () => {
+    if ($("yasakDiyalog").returnValue !== "tamam") return;
+    const sn = +$("ySure").value, neden = $("yNeden").value.trim();
+    try { await yasakKaydet(p.id, { b: sn ? simdi() + sn : 0, n: neden, z: simdi() }); toast(`${p.ad} yasaklandı.`); } catch (e) { hataGoster("Yasak yazılamadı: " + e.message); }
+    ciz();
+  };
+  $("yasakDiyalog").returnValue = "";
+  $("yasakDiyalog").showModal();
+}
+
+function ayarCiz(ic) {
+  const d = ayar.duyuru || {}, b = ayar.bakim || {};
+  const duyuruAktif = d.metin && d.bitis > simdi();
+  ic.innerHTML = `<div class="ayarlar">
+    <form class="kart" id="fDuyuru"><h2>Duyuru</h2>
+      <div class="not">Herkesin lobisinde üstte görünür (oyuncu kapatabilir). ${duyuruAktif ? `Yayında: ${sure(d.bitis - simdi())} kaldı.` : "Şu an duyuru yok."}</div>
+      <label>Mesaj<textarea id="dMetin" maxlength="200" placeholder="ör. Bu akşam 21:00'de klan etkinliği var!">${kacis(duyuruAktif ? d.metin : "")}</textarea></label>
+      <label>Ne kadar yayında kalsın<select id="dSure"><option value="3600">1 saat</option><option value="21600">6 saat</option><option value="86400" selected>1 gün</option><option value="259200">3 gün</option><option value="604800">7 gün</option></select></label>
+      <div class="satirlar"><button class="ana" type="submit">Yayınla</button>${duyuruAktif ? `<button type="button" id="dKaldir" class="tehlike">Duyuruyu kaldır</button>` : ""}</div>
+    </form>
+    <form class="kart" id="fBakim"><h2>Bakım modu</h2>
+      <div class="not">Açıkken oyuncular "bakımdayız" ekranı görür, haritadakiler lobiye alınır (en geç 2 dk). Yöneticiler girebilir.</div>
+      <label class="anahtar"><input type="checkbox" id="bAcik" ${b.acik ? "checked" : ""}> Bakım modu ${b.acik ? "<b class=\"hata\">AÇIK</b>" : "kapalı"}</label>
+      <label>Oyunculara mesaj<input id="bMesaj" maxlength="160" value="${kacis(b.mesaj || "")}" placeholder="ör. Güncelleme yapılıyor, 30 dakika sonra geri döneceğiz."></label>
+      <div class="satirlar"><button class="ana" type="submit">Kaydet</button></div>
+    </form>
+    <form class="kart" id="fSurum"><h2>Zorunlu güncelleme</h2>
+      <div class="not">Bu sürüm kodunun altındaki oyuncular "güncelleme gerekli" ekranı görür ve oynayamaz. 0 = kapalı. Oyuncuların sürümleri Oyuncular sekmesinde.</div>
+      <label>En düşük sürüm kodu<input id="sKod" type="number" min="0" step="1" value="${ayar.minSurum || 0}"></label>
+      <label>Mesaj<input id="sMesaj" maxlength="160" value="${kacis(ayar.surumMesaj || "")}" placeholder="ör. Yeni sürümü indir: ..."></label>
+      <div class="satirlar"><button class="ana" type="submit">Kaydet</button></div>
+    </form>
+  </div>`;
+  const kaydet = async (degisim, mesaj) => {
+    try { await ayarKaydet(degisim); toast(mesaj); } catch (e) { hataGoster("Kaydedilemedi: " + e.message); }
+    ciz();
+  };
+  $("fDuyuru").onsubmit = e => { e.preventDefault(); const m = $("dMetin").value.trim(); if (!m) return toast("Mesaj yaz.");
+    kaydet({ duyuru: { metin: m, z: simdi(), bitis: simdi() + +$("dSure").value } }, "Duyuru yayınlandı (oyunculara 2 dk içinde ulaşır)."); };
+  if ($("dKaldir")) $("dKaldir").onclick = () => kaydet({ duyuru: null }, "Duyuru kaldırıldı.");
+  $("fBakim").onsubmit = e => { e.preventDefault(); const acik = $("bAcik").checked;
+    if (acik && !(ayar.bakim && ayar.bakim.acik) && !confirm("Bakım modu açılsın mı? Oyuncular oyuna giremez.")) return;
+    kaydet({ bakim: { acik, mesaj: $("bMesaj").value.trim() } }, acik ? "Bakım modu açıldı." : "Bakım modu kapatıldı."); };
+  $("fSurum").onsubmit = e => { e.preventDefault(); kaydet({ minSurum: Math.max(0, parseInt($("sKod").value, 10) || 0), surumMesaj: $("sMesaj").value.trim() }, "Sürüm ayarı kaydedildi."); };
+}
+</script>
+</body>
+</html>
