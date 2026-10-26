@@ -99,6 +99,9 @@ code { background: var(--panel2); padding: 2px 6px; border-radius: 6px; color: v
 .anahtar { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text); font-size: 15px; }
 .anahtar input { width: auto; }
 .gizli { display: none !important; }
+.kart.tikla { cursor: pointer; }
+.kart.tikla:hover { border-color: var(--mavi); }
+.kart.hizli { margin-bottom: 12px; }
 dialog { border: 1px solid var(--kenar); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; width: min(640px, calc(100vw - 32px)); box-shadow: var(--golge); }
 dialog::backdrop { background: rgba(0, 0, 0, .5); }
 .diyalog { padding: 20px; display: grid; gap: 14px; }
@@ -339,15 +342,16 @@ function ciz() {
 
 function ozetCiz(ic) {
   const bugun = gunNo(simdi());
+  const cevrimiciler = oyuncular.filter(p => simdi() - p.son < CEVRIMICI_SN).sort((a, b) => b.son - a.son);
   const kartlar = [
-    ["Toplam kayıtlı oyuncu", oyuncular.length],
-    ["Şu an çevrimiçi", oyuncular.filter(p => simdi() - p.son < CEVRIMICI_SN).length],
-    ["Şu an haritada", oyuncular.filter(p => simdi() - p.son < CEVRIMICI_SN && p.yer === "harita").length],
+    ["Toplam kayıtlı oyuncu", oyuncular.length, null, "oyuncular:hepsi"],
+    ["Şu an çevrimiçi", cevrimiciler.length, null, "oyuncular:acik"],
+    ["Şu an haritada", cevrimiciler.filter(p => p.yer === "harita").length, null, "oyuncular:acik"],
     ["Bugün oynayan", oyuncular.filter(p => gunNo(p.son) === bugun).length],
     ["Son 7 günde oynayan", oyuncular.filter(p => bugun - gunNo(p.son) < 7).length],
     ["Son 7 günde yeni", oyuncular.filter(p => p.ilk && bugun - gunNo(p.ilk) < 7).length],
-    ["Hile şüphelisi", oyuncular.filter(p => p.hile > 0).length],
-    ["Yasaklı", oyuncular.filter(p => yasagi(p.id)).length],
+    ["Hile şüphelisi", oyuncular.filter(p => p.hile > 0).length, null, "hile:hepsi"],
+    ["Yasaklı", oyuncular.filter(p => yasagi(p.id)).length, null, "yasakli:hepsi"],
     ["Toplam oynama", null, oynama(oyuncular.reduce((t, p) => t + p.sure, 0))],
     ["Oyunculardaki para (₺)", oyuncular.reduce((t, p) => t + p.para, 0)],
   ];
@@ -355,15 +359,48 @@ function ozetCiz(ic) {
   const gunler = [...Array(30)].map((_, i) => bugun - 29 + i);
   const aktif = gunler.map(g => oyuncular.filter(p => p.gunler.includes(g) || gunNo(p.son) === g).length);
   const yeni = gunler.map(g => oyuncular.filter(p => p.ilk && gunNo(p.ilk) === g).length);
-  ic.innerHTML = `<div class="ozet">${kartlar.map(([a, v, m]) => `<div class="kart"><span>${a}</span><b>${m ?? sayi(v)}</b></div>`).join("")}</div>
+  ic.innerHTML = `<div class="ozet">${kartlar.map(([a, v, m, git]) => `<div class="kart${git ? " tikla" : ""}"${git ? ` data-git="${git}"` : ""}><span>${a}</span><b>${m ?? sayi(v)}</b></div>`).join("")}</div>
+    ${hizliIslemler()}
+    ${cevrimiciListesi(cevrimiciler)}
     <div class="grafikler">
       ${grafikKarti("aktif", "Günlük aktif oyuncu", "son 30 gün")}
       ${grafikKarti("yeni", "Yeni oyuncu", "son 30 gün")}
     </div>
     <p class="not">Çevrimiçi: son 5 dakikada oyunu açık olanlar. Liste ve grafikler oyunun yönetim kaydı içeren sürümünü en az bir kez açmış oyuncuları kapsar.</p>`;
+  ic.querySelectorAll("[data-git]").forEach(k => k.onclick = () => { const [sk, b] = k.dataset.git.split(":"); sekme = sk; baglanti = b; arama = ""; sekmeleriCiz(); ciz(); });
+  ic.querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = () => detayAc(tr.dataset.id));
+  const bk = $("hizliBakim");
+  if (bk) bk.onclick = async () => {
+    const acik = !(ayar.bakim && ayar.bakim.acik);
+    if (acik && !confirm("Oyun bakıma alınsın mı? Yönetici olmayan herkes (telefondaki kendi oyun hesabın da) 2 dakika içinde lobiye alınır ve oynayamaz.")) return;
+    bk.disabled = true;
+    try { await ayarKaydet({ bakim: { acik, mesaj: (ayar.bakim && ayar.bakim.mesaj) || "" } }); toast(acik ? "Bakım modu açıldı (oyunculara 2 dk içinde ulaşır)." : "Bakım modu kapatıldı."); }
+    catch (e) { hataGoster("Kaydedilemedi: " + e.message); }
+    ciz();
+  };
+  const dy = $("hizliDuyuru");
+  if (dy) dy.onclick = () => { sekme = "ayar"; sekmeleriCiz(); ciz(); };
   sutunGrafigi($("g_aktif"), gunler, aktif, "oyuncu");
   sutunGrafigi($("g_yeni"), gunler, yeni, "yeni oyuncu");
 }
+// Özet'te tek dokunuşla: bakım aç/kapat, duyuru yaz.
+function hizliIslemler() {
+  const acik = ayar.bakim && ayar.bakim.acik;
+  return `<div class="kart hizli"><h2>Hızlı işlemler</h2><div class="satirlar">
+    <button type="button" id="hizliBakim" class="${acik ? "ana" : "tehlike dolu"}">${acik ? "Bakımı kapat (oyunu aç)" : "Oyunu bakıma al"}</button>
+    <button type="button" id="hizliDuyuru">Duyuru yaz</button>
+    <span class="durum">${acik ? "Bakım modu AÇIK: oyuncular giremiyor." : "Oyun açık."}</span></div></div>`;
+}
+
+// Şu an çevrimiçi olanlar: ad, numara, nerede, para, oynama; dokununca ayrıntı.
+function cevrimiciListesi(liste) {
+  const satirlar = liste.slice(0, 50).map(p => `<tr data-id="${p.id}"><td>${kacis(p.ad)}</td><td class="no">${kacis(p.no)}</td>
+    <td><span class="etiket cevrimici"><i></i>${p.yer === "harita" ? "haritada" : "lobide"}</span></td><td class="sayi">₺ ${sayi(p.para)}</td><td class="sayi">${oynama(p.sure)}</td></tr>`).join("");
+  return `<div class="kart" style="margin-bottom:12px"><h2>Şu an çevrimiçi (${liste.length})</h2>${liste.length ? `<div class="tablo-kap"><table>
+    <thead><tr><th>Ad</th><th>Numara</th><th>Nerede</th><th class="sayi">Para</th><th class="sayi">Oynama</th></tr></thead><tbody>${satirlar}</tbody></table></div>`
+    : '<div class="not">Şu an kimse çevrimiçi değil (son 5 dakikada oyunu açık olan yok).</div>'}</div>`;
+}
+
 function grafikKarti(id, ad, alt) {
   return `<div class="kart"><div class="grafik-bas"><h2>${ad}</h2><span class="durum">${alt}</span><span class="bos"></span>
     <button type="button" onclick="this.closest('.kart').querySelector('.tablo-gorunum').classList.toggle('gizli')">Tablo</button></div>
