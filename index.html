@@ -225,10 +225,6 @@ function paneliAc() {
   sekmeleriCiz();
   yukle();
 }
-try {
-  const o = JSON.parse(sessionStorage.getItem("vx_oturum") || "null");
-  if (o && o.bitis > Date.now()) { token = o.token; benId = o.benId; paneliAc(); }
-} catch (e) {}
 
 // ---- Veri ----
 async function istek(url, secenek = {}) {
@@ -566,6 +562,12 @@ function ayarCiz(ic) {
     kaydet({ bakim: { acik, mesaj: $("bMesaj").value.trim() } }, acik ? "Bakım modu açıldı." : "Bakım modu kapatıldı."); };
   $("fSurum").onsubmit = e => { e.preventDefault(); kaydet({ minSurum: Math.max(0, parseInt($("sKod").value, 10) || 0), surumMesaj: $("sMesaj").value.trim() }, "Sürüm ayarı kaydedildi."); };
 }
+
+// Kayıtlı oturum (sayfa yenilenince yeniden giriş istemesin; en çok 1 saat). Sonda: bütün tanımlar hazır olsun.
+try {
+  const o = JSON.parse(sessionStorage.getItem("vx_oturum") || "null");
+  if (o && o.bitis > Date.now()) { token = o.token; benId = o.benId; paneliAc(); }
+} catch (e) { console.error(e); }
 </script>
 </body>
 </html>
