@@ -10,7 +10,7 @@
 <!--
   VORZEX MOBILE yönetici paneli (tarayıcıdan). Oyunun kendi Unity servislerini kullanır; sunucu yok.
   Giriş: Unity Authentication kullanıcı adı + şifre. Ana hesap (SAHIP) oyundaki Yonetim.Yoneticiler'in ilki;
-  ek yöneticileri Yöneticiler sekmesinden kullanıcı adı + şifreyle o ekler (liste: ana hesabın "yon_yoneticiler").
+  ek yöneticileri Yöneticiler sekmesinden kullanıcı adı + şifreyle o ve tam yetkililer ekler (her biri kendi "yon_yoneticiler" kaydına).
   Veri (Cloud Save, herkese açık; her yönetici kendi kaydına yazar, panel ve oyun hepsini birleştirir):
     oyuncular  "oy_*"   (her oyuncu kendisi yazar, 2 dk'da bir; "oy_son" sorgu dizini)
     yönetici   "yon_yasak"  {"<oyuncuId>": {"b": bitiş unix (0 kalıcı), "n": neden, "z": an, "y": veren, "s": 1 kaldırıldı}}
@@ -18,7 +18,7 @@
                "yon_ayar"   {"duyuru": {"metin", "z", "bitis"}, "bakim": {"acik", "mesaj"}, "minSurum", "surumMesaj", "z"}
                             (en yeni "z" taşıyan geçerli)
                "yon_kayit"  [{"z", "t"}] işlem geçmişi (son 200)
-    ana hesap  "yon_yoneticiler" {"<kimlik>": {"ad", "k": kullanıcı adı, "z"}}
+               "yon_yoneticiler" {"<kimlik>": {"ad", "k": kullanıcı adı, "z", "tam", "s": 1 çıkarıldı}} (ana hesap ve tam yetkililer)
   Oyun bunları 2 dk'da bir okur. Bu dosyada şifre ya da gizli anahtar yoktur.
 -->
 <style>
@@ -201,7 +201,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
     <label>Şifre<input id="sifre" type="password" autocomplete="current-password" required></label>
     <button class="ana" type="submit">Giriş yap</button>
     <div id="girisHata" class="not hata"></div>
-    <div class="not" style="text-align:center">Hesabın yoksa ana yöneticiden iste: Yöneticiler sekmesinden senin için kullanıcı adı ve şifre oluşturur.</div>
+    <div class="not" style="text-align:center">Hesabın yoksa bir tam yetkili yöneticiden iste: Yöneticiler sekmesinden senin için kullanıcı adı ve şifre oluşturur.</div>
   </form>
 
   <main id="panel" class="gizli">
@@ -229,7 +229,8 @@ const SAHIP = "4tI2VJEacbPQsD198kYXXh8GaX0y", EDITOR = "rWjBpXWd5BF9SWbJPFZIWPA4
 const YON_ANAHTAR = ["yon_yasak", "yon_ayar", "yon_kayit"];
 
 let token = null, benId = null, oyuncular = [], yasaklar = {}, ayar = {}, sekme = "ozet", arama = "", baglanti = "hepsi", siralama = { alan: "son", ters: true };
-let yoneticiler = {}, benim = { yasak: {}, kayit: [] }, gecmis = [], yetkili = false;
+let yoneticiler = {}, benimListe = {}, benim = { yasak: {}, kayit: [] }, gecmis = [], yetkili = false;
+const tamYetkili = () => benId === SAHIP || !!(yoneticiler[benId] && yoneticiler[benId].tam);
 const $ = id => document.getElementById(id);
 const simdi = () => Math.floor(Date.now() / 1000);
 const gunNo = t => Math.floor((t + TR) / GUN_SN);
@@ -318,7 +319,7 @@ const benAd = () => (yoneticiler[benId] && yoneticiler[benId].ad) || "Yönetici"
 function kimiCiz() {
   const k = $("benKim");
   if (!yetkili) { k.classList.add("gizli"); return; }
-  k.innerHTML = `<i>${kacis(benAd().charAt(0).toLocaleUpperCase("tr-TR"))}</i>${kacis(benAd())}${benId === SAHIP ? ' <span class="rozet altin">ana</span>' : ""}`;
+  k.innerHTML = `<i>${kacis(benAd().charAt(0).toLocaleUpperCase("tr-TR"))}</i>${kacis(benAd())}${benId === SAHIP ? ' <span class="rozet altin">ana</span>' : tamYetkili() ? ' <span class="rozet altin">tam</span>' : ""}`;
   k.classList.remove("gizli");
 }
 
@@ -392,16 +393,35 @@ async function kayitlariOku(id, anahtarlar) {
 }
 
 // Bütün yöneticilerin kayıtlarını okur ve birleştirir: yasakta her oyuncu için en yeni kayıt, ayarda en yeni "z".
+// Yönetici listesi: ana hesap ve tam yetkililer kendi "yon_yoneticiler" kaydına yazar; her kişi için en yeni kayıt
+// geçerli ("s": 1 çıkarıldı). Tam yetkili kümesi değişmeyene kadar tekrarlanır (çıkarılanın verdiği yetkiler düşer).
 async function yonetimKaydiniOku() {
-  const sahip = await kayitlariOku(SAHIP, [...YON_ANAHTAR, "yon_yoneticiler"]);
-  yoneticiler = { [SAHIP]: { ad: "Ana yönetici" }, [EDITOR]: { ad: "Unity editörü" }, ...(jsonCoz(sahip.yon_yoneticiler) || {}) };
+  const kayitlar = {};
+  const oku = async id => {
+    if (!kayitlar[id]) { try { kayitlar[id] = await kayitlariOku(id, [...YON_ANAHTAR, "yon_yoneticiler"]); } catch (e) { kayitlar[id] = {}; } }
+    return kayitlar[id];
+  };
+  let tam = new Set([SAHIP]), en = {};
+  for (let tur = 0; tur < 6; tur++) {
+    await Promise.all([...tam].map(oku));
+    en = {};
+    for (const kim of tam)
+      for (const [id, y] of Object.entries(jsonCoz(kayitlar[kim].yon_yoneticiler) || {})) {
+        if (id === SAHIP || id === EDITOR || (y.z || 0) > simdi() + 300) continue;
+        if (!en[id] || (y.z || 0) > (en[id].z || 0)) en[id] = { ...y, kim };
+      }
+    const yeni = new Set([SAHIP, ...Object.keys(en).filter(id => !en[id].s && en[id].tam)]);
+    if (yeni.size === tam.size && [...yeni].every(id => tam.has(id))) break;
+    tam = yeni;
+  }
+  yoneticiler = { [SAHIP]: { ad: "Ana yönetici", tam: true }, [EDITOR]: { ad: "Unity editörü" } };
+  for (const [id, y] of Object.entries(en)) if (!y.s) yoneticiler[id] = y;
   yetkili = !!yoneticiler[benId];
-  const kayitlar = { [SAHIP]: sahip };
-  await Promise.all(Object.keys(yoneticiler).filter(id => id !== SAHIP).map(async id => {
-    try { kayitlar[id] = await kayitlariOku(id, YON_ANAHTAR); } catch (e) { kayitlar[id] = {}; }
-  }));
+  await Promise.all(Object.keys(yoneticiler).map(oku));
+  benimListe = jsonCoz((kayitlar[benId] || {}).yon_yoneticiler) || {};
   const birlesik = {}; let enYeniAyar = null; const g = [];
-  for (const [id, d] of Object.entries(kayitlar)) {
+  for (const id of Object.keys(yoneticiler)) {
+    const d = kayitlar[id] || {};
     for (const [oid, y] of Object.entries(yasakCoz(d.yon_yasak))) {
       const e = birlesik[oid];
       if (!e || (y.z || 0) > (e.z || 0)) birlesik[oid] = y;
@@ -447,9 +467,14 @@ async function ayarKaydet(degisim, not) {
   await yaz("yon_ayar", ayar);
   await kayitEkle(not);
 }
-async function yoneticiListesiYaz(liste, not) {
-  if (benId !== SAHIP) throw new Error("Yönetici ekleyip çıkarmayı yalnız ana yönetici yapabilir.");
-  await yaz("yon_yoneticiler", liste);
+// Kendi listesine tek kişinin kaydını yazar (ekle / tam yetki değiştir / çıkar: kayit.s = 1). Eski çıkarmalar 90 günde silinir.
+async function yoneticiKaydet(id, kayit, not) {
+  await yonetimKaydiniOku();
+  if (!tamYetkili()) throw new Error("Yönetici ekleyip çıkarmak için tam yetki gerekir.");
+  const l = {};
+  for (const [k, v] of Object.entries(benimListe)) if (!v.s || simdi() - (v.z || 0) < 90 * GUN_SN) l[k] = v;
+  l[id] = { ...kayit, z: simdi() };
+  await yaz("yon_yoneticiler", l);
   await kayitEkle(not);
   await yonetimKaydiniOku();
 }
@@ -724,31 +749,38 @@ function ayarCiz(ic) {
     kaydet({ minSurum: kod, surumMesaj: $("sMesaj").value.trim() }, "Sürüm ayarı kaydedildi.", `En düşük sürüm: ${kod || "kapalı"}`); };
 }
 
-// Yöneticiler: liste herkese görünür; ekleme / çıkarma yalnız ana yöneticide.
+// Yöneticiler: liste herkese görünür; ekleme, çıkarma ve tam yetki verme tam yetkililerde (ana yönetici her zaman tam).
 function yoneticiCiz(ic) {
-  const sahip = benId === SAHIP;
+  const yetki = tamYetkili();
   const sabit = id => id === SAHIP || id === EDITOR;
+  const ad = id => (yoneticiler[id] && yoneticiler[id].ad) || "?";
   const satirlar = Object.entries(yoneticiler).map(([id, y]) => `<tr>
-      <td><b>${kacis(y.ad)}</b>${id === benId ? ' <span class="rozet">sen</span>' : ""}${id === SAHIP ? ' <span class="rozet altin">ana</span>' : ""}</td>
-      <td>${y.k ? kacis(y.k) : '<span class="durum">-</span>'}</td><td>${y.z ? tarih(y.z) : '<span class="durum">-</span>'}</td>
+      <td><b>${kacis(y.ad)}</b>${id === benId ? ' <span class="rozet">sen</span>' : ""}</td>
+      <td>${id === SAHIP ? '<span class="rozet altin">ana yönetici</span>' : id === EDITOR ? '<span class="rozet">oyun editörü</span>' : y.tam ? '<span class="rozet altin">tam yetki</span>' : '<span class="rozet">yönetici</span>'}</td>
+      <td>${y.k ? kacis(y.k) : '<span class="durum">-</span>'}</td>
+      <td>${y.kim ? kacis(ad(y.kim)) : '<span class="durum">-</span>'}</td>
+      <td>${y.z ? tarih(y.z) : '<span class="durum">-</span>'}</td>
       <td><code>${kacis(id)}</code></td>
-      <td class="sayi">${sahip && !sabit(id) ? `<button type="button" class="tehlike" data-sil="${kacis(id)}">Çıkar</button>` : ""}</td></tr>`).join("");
+      <td class="sayi">${yetki && !sabit(id) && id !== benId ? `<span class="satirlar" style="justify-content:flex-end;flex-wrap:nowrap">
+        <button type="button" data-tam="${kacis(id)}">${y.tam ? "Tam yetkiyi al" : "Tam yetki ver"}</button>
+        <button type="button" class="tehlike" data-sil="${kacis(id)}">Çıkar</button></span>` : ""}</td></tr>`).join("");
   ic.innerHTML = `<div class="ayarlar">
     <div class="kart" style="grid-column:1/-1"><h2>Yöneticiler (${Object.keys(yoneticiler).length})</h2>
-      <div class="tablo-kap"><table class="duz"><thead><tr><th>Ad</th><th>Kullanıcı adı</th><th>Eklendi</th><th>Kimlik</th><th></th></tr></thead><tbody>${satirlar}</tbody></table></div>
-      <div class="not" style="margin-top:10px">Yöneticiler oyuncuları yasaklayabilir, duyuru, bakım ve sürüm ayarlarını değiştirebilir. Her işlem İşlem geçmişi'nde görünür.
-        Çıkarılan yöneticinin koyduğu yasaklar da kalkar.</div></div>
-    ${sahip ? `<form class="kart" id="fYonetici"><h2>Yönetici ekle</h2>
+      <div class="tablo-kap"><table class="duz"><thead><tr><th>Ad</th><th>Yetki</th><th>Kullanıcı adı</th><th>Ekleyen</th><th>Tarih</th><th>Kimlik</th><th></th></tr></thead><tbody>${satirlar}</tbody></table></div>
+      <div class="not" style="margin-top:10px"><b>Yönetici:</b> oyuncuları yasaklar, duyuru, bakım ve sürüm ayarlarını değiştirir.
+        <b>Tam yetki:</b> bunlara ek olarak yönetici ekler, çıkarır, tam yetki verir ve alır (ana yönetici gibi). Ana yönetici çıkarılamaz.
+        Çıkarılan yöneticinin koyduğu yasaklar ve verdiği yetkiler de kalkar. Her işlem İşlem geçmişi'nde görünür.</div></div>
+    ${yetki ? `<form class="kart" id="fYonetici"><h2>Yönetici ekle</h2>
       <div class="not">Bu kullanıcı adı ve şifreyle panel hesabı açılır; kişi bu sayfadan aynı bilgilerle giriş yapar. Şifreyi ona sen ilet.</div>
       <label>Ad (listede görünür)<input id="yAd" maxlength="30" required placeholder="ör. Mehmet"></label>
       <label>Kullanıcı adı<input id="yKad" required minlength="3" maxlength="20" autocomplete="off" pattern="[A-Za-z0-9.@_-]{3,20}" placeholder="ör. mehmet.vx"></label>
       <label>Şifre<input id="ySifre" required minlength="8" maxlength="30" autocomplete="new-password" placeholder="en az 8 karakter"></label>
+      <label class="anahtar"><input type="checkbox" id="yTam"> Tam yetki (o da yönetici ekleyip çıkarabilsin)</label>
       <div class="satirlar"><button type="button" id="ySifreUret">Güçlü şifre üret</button><span class="bos"></span><button class="ana" type="submit">Ekle</button></div>
       <div class="not">Kullanıcı adı: İngilizce harf, rakam, . - @ _ (3-20). Şifre: 8-30 karakter, büyük harf, küçük harf, rakam ve sembol.</div>
-    </form>` : `<div class="kart"><h2>Yönetici ekle</h2><div class="not">Yönetici ekleyip çıkarmayı yalnız ana yönetici yapabilir.</div></div>`}
+    </form>` : `<div class="kart"><h2>Yönetici ekle</h2><div class="not">Yönetici ekleyip çıkarmak için tam yetki gerekir.</div></div>`}
   </div>`;
-  if (!sahip) return;
-  const ekliler = () => Object.fromEntries(Object.entries(yoneticiler).filter(([id]) => !sabit(id)));
+  if (!yetki) return;
   $("ySifreUret").onclick = () => {
     const h = "ABCDEFGHJKLMNPRSTUVYZ", k = "abcdefghijkmnprstuvyz", r = "23456789", s = "!@#$%*?";
     const sec = t => t[crypto.getRandomValues(new Uint32Array(1))[0] % t.length];
@@ -758,27 +790,32 @@ function yoneticiCiz(ic) {
   };
   $("fYonetici").onsubmit = async e => {
     e.preventDefault();
-    const ad = $("yAd").value.trim(), kad = $("yKad").value.trim(), sifre = $("ySifre").value;
+    const yad = $("yAd").value.trim(), kad = $("yKad").value.trim(), sifre = $("ySifre").value, t = $("yTam").checked;
     const dugme = e.submitter; if (dugme) dugme.disabled = true;
     try {
       const id = await hesapKimligi(kad, sifre);
       await yonetimKaydiniOku();
       if (yoneticiler[id]) throw new Error("Bu hesap zaten yönetici.");
-      await yoneticiListesiYaz({ ...ekliler(), [id]: { ad, k: kad, z: simdi() } }, `Yönetici eklendi: ${ad} (${kad})`);
-      toast(`${ad} yönetici yapıldı. Kullanıcı adı ve şifreyi ona ilet.`);
+      await yoneticiKaydet(id, { ad: yad, k: kad, tam: t }, `Yönetici eklendi${t ? " (tam yetki)" : ""}: ${yad} (${kad})`);
+      toast(`${yad} yönetici yapıldı. Kullanıcı adı ve şifreyi ona ilet.`);
     } catch (err) { hataGoster(err.message); toast("Eklenemedi: " + err.message); }
     ciz();
   };
+  const kayit = y => ({ ad: y.ad, k: y.k, tam: !!y.tam });
+  ic.querySelectorAll("[data-tam]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.tam, y = yoneticiler[id], ver = !y.tam;
+    if (ver && !confirm(`${y.ad} tam yetkili olsun mu? Yönetici ekleyip çıkarabilir, başkasına tam yetki verip alabilir.`)) return;
+    b.disabled = true;
+    try { await yoneticiKaydet(id, { ...kayit(y), tam: ver }, `${ver ? "Tam yetki verildi" : "Tam yetki alındı"}: ${y.ad}`); toast(ver ? `${y.ad} artık tam yetkili.` : `${y.ad} artık normal yönetici.`); }
+    catch (err) { hataGoster(err.message); }
+    ciz();
+  });
   ic.querySelectorAll("[data-sil]").forEach(b => b.onclick = async () => {
     const id = b.dataset.sil, y = yoneticiler[id];
-    if (!confirm(`${y.ad} yöneticilikten çıkarılsın mı? Panele giremez, koyduğu yasaklar kalkar.`)) return;
+    if (!confirm(`${y.ad} yöneticilikten çıkarılsın mı? Panele giremez, koyduğu yasaklar ve verdiği yetkiler kalkar.`)) return;
     b.disabled = true;
-    try {
-      await yonetimKaydiniOku();
-      const l = ekliler(); delete l[id];
-      await yoneticiListesiYaz(l, `Yönetici çıkarıldı: ${y.ad}${y.k ? " (" + y.k + ")" : ""}`);
-      toast(`${y.ad} çıkarıldı.`);
-    } catch (err) { hataGoster(err.message); }
+    try { await yoneticiKaydet(id, { ...kayit(y), s: 1 }, `Yönetici çıkarıldı: ${y.ad}${y.k ? " (" + y.k + ")" : ""}`); toast(`${y.ad} çıkarıldı.`); }
+    catch (err) { hataGoster(err.message); }
     ciz();
   });
 }
