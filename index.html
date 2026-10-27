@@ -174,6 +174,23 @@ dt { color: var(--soluk); font-size: 13px; }
 dd { margin: 0; overflow-wrap: anywhere; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--panel-d); border: 1px solid var(--kenar); box-shadow: var(--golge);
   border-radius: 12px; padding: 10px 16px; font-size: 14px; z-index: 10; }
+a { color: var(--mavi); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a.dugme { display: inline-block; border: 1px solid var(--kenar); background: var(--panel2); padding: 8px 14px; border-radius: 10px; color: var(--text); font-weight: 500; }
+a.dugme:hover { border-color: var(--mavi); text-decoration: none; }
+.adimlar { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; counter-reset: adim; }
+.adimlar div { position: relative; padding: 14px 14px 14px 52px; font-size: 13px; color: var(--soluk); }
+.adimlar div b { display: block; color: var(--text); font-size: 14px; margin-bottom: 2px; }
+.adimlar div::before { counter-increment: adim; content: counter(adim); position: absolute; left: 14px; top: 14px; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; background: linear-gradient(135deg, var(--mavi), var(--mavi2)); }
+.proje-bas { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.proje-bas h2 { margin: 0; }
+.degisiklik { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; max-height: 220px; overflow: auto; }
+.degisiklik li { font-size: 13px; padding: 8px 10px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--kenar); }
+.degisiklik li span { color: var(--soluk); font-size: 12px; }
+.gel-durum { font-size: 14px; margin: 4px 0 10px; }
+.gel-durum.hazir b { color: var(--altin); }
+.gel-durum.guncel b { color: var(--yesil); }
 @media (max-width: 640px) { .ozet { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .ozet .kart { padding: 14px; } .ozet .kart b { font-size: 24px; } #durum { display: none; } .marka span { display: none; } .kap { padding-left: 16px; padding-right: 16px; } }
 </style>
 </head>
@@ -483,11 +500,12 @@ function hataGoster(m) { $("hataKutu").textContent = m; $("hataKutu").classList.
 
 // ---- Çizim ----
 const SEKMELER = [["ozet", "Özet"], ["oyuncular", "Oyuncular"], ["hile", "Hile şüphelileri"], ["yasakli", "Yasaklılar"], ["jeton", "Jeton (Elmas)"],
-  ["ayar", "Duyuru · Bakım · Sürüm"], ["yonetici", "Yöneticiler"], ["gecmis", "İşlem geçmişi"]];
+  ["ayar", "Duyuru · Bakım · Sürüm"], ["yonetici", "Yöneticiler"], ["gecmis", "İşlem geçmişi"], ["gelistirme", "Geliştirme"]];
 function sekmeleriCiz() {
   $("sekmeler").innerHTML = "";
   const sayac = { hile: oyuncular.filter(p => p.hile > 0 && !yasagi(p.id)).length };
   for (const [k, ad] of SEKMELER) {
+    if (k === "gelistirme" && !tamYetkili()) continue; // geliştirme yalnız tam yetkililerde
     const b = document.createElement("button");
     b.type = "button";
     b.innerHTML = kacis(ad) + (sayac[k] ? `<span class="sayac">${sayac[k]}</span>` : "");
@@ -512,6 +530,7 @@ function ciz() {
   if (sekme === "ayar") return ayarCiz(ic);
   if (sekme === "yonetici") return yoneticiCiz(ic);
   if (sekme === "gecmis") return gecmisCiz(ic);
+  if (sekme === "gelistirme") return tamYetkili() ? gelistirmeCiz(ic) : (ic.innerHTML = '<div class="kart not">Geliştirme için tam yetki gerekir.</div>');
   let liste = oyuncular, baslik = "";
   if (sekme === "hile") { liste = oyuncular.filter(p => p.hile > 0); baslik = `<div class="uyari">Oyunun kendi bildirdiği şüpheli olaylar (para kaydı/belleği değiştirilmiş, anormal hız, yöneticisiz uçuş). Kesin kanıt değildir: incele, sonra yasakla.</div>`; }
   if (sekme === "yasakli") { liste = oyuncular.filter(p => yasagi(p.id)); baslik = ""; }
@@ -818,6 +837,116 @@ function yoneticiCiz(ic) {
     catch (err) { hataGoster(err.message); }
     ciz();
   });
+}
+
+// ---- Geliştirme (tam yetkililer) ----
+// Düğmeler bilgisayardaki Vorzex Geliştirme Aracı'nı "vorzex-gelistir:" adresiyle çağırır (gelistirme/kur.cmd bir kez kurar):
+// VS Code'da aç (depo yoksa GitHub'dan çeker, "gelistirme" dalına geçer), oyunu Unity'de önizle, canlıya al (gelistirme -> main).
+// Panel önizlemesi araçsız: GitHub'daki gelistirme dalının index.html'i yeni sekmede (gerçek verilerle) açılır.
+const GH_API = "https://api.github.com/repos/", PANEL_DEPO = "ahmetdagbasiclaude-hub/vorzex-panel", OYUN_DEPO = "ahmetdagbasiclaude-hub/oyunlar-m";
+let gelPanel = null, gelHata = "", gelIzle = null;
+
+function aracCagir(is, not) {
+  location.href = "vorzex-gelistir:" + is;
+  toast("Geliştirme Aracı açılıyor... Tarayıcı izin sorarsa \"Aç\"a bas. Hiçbir şey olmazsa önce aracı kur (1. adım).");
+  if (not) kayitEkle(not);
+}
+async function panelDurumu() {
+  gelHata = "";
+  try {
+    const r = await fetch(`${GH_API}${PANEL_DEPO}/compare/main...gelistirme`, { headers: { Accept: "application/vnd.github+json" } });
+    if (r.status === 404) { gelPanel = { yok: true }; return; }
+    if (!r.ok) throw new Error(r.status === 403 ? "GitHub sorgu sınırı doldu, birkaç dakika sonra yenile." : "GitHub: " + r.status);
+    const j = await r.json();
+    gelPanel = { ileri: j.ahead_by, geri: j.behind_by, sha: j.commits.length ? j.commits[j.commits.length - 1].sha : (j.merge_base_commit || {}).sha,
+      kayitlar: j.commits.map(c => ({ m: c.commit.message.split("\n")[0], kim: c.commit.author.name, z: Date.parse(c.commit.author.date) / 1000 })).reverse(),
+      dosyalar: (j.files || []).map(f => f.filename) };
+  } catch (e) { gelHata = e.message; }
+}
+async function paneliOnizle() {
+  const w = window.open("", "_blank"); // açılır pencere engeline takılmasın diye hemen açılır
+  try {
+    const d = await (await fetch(`${GH_API}${PANEL_DEPO}/branches/gelistirme`)).json();
+    if (!d.commit) throw new Error("GitHub'da gelistirme dalı yok: önce \"VS Code ile geliştir\".");
+    const sha = d.commit.sha;
+    const r = await fetch(`https://raw.githubusercontent.com/${PANEL_DEPO}/${sha}/index.html`);
+    if (!r.ok) throw new Error("Önizleme alınamadı: " + r.status);
+    const serit = `<div style="position:fixed;z-index:999;left:0;right:0;bottom:0;background:#f59e0b;color:#111;font:600 13px/1.4 system-ui,sans-serif;padding:7px 12px;text-align:center">
+      ÖNİZLEME · gelistirme dalı · ${sha.slice(0, 7)} · Canlı değil, ama gerçek verilerle çalışır (yasak, duyuru gerçekten uygulanır)</div>`;
+    const sayfa = (await r.text()).replace(/<head([^>]*)>/i, m => `${m}<base href="https://ahmetdagbasiclaude-hub.github.io/vorzex-panel/">`)
+      .replace(/<body([^>]*)>/i, m => m + serit);
+    w.location.href = URL.createObjectURL(new Blob([sayfa], { type: "text/html" }));
+  } catch (e) { w.close(); hataGoster(e.message); toast(e.message); }
+}
+// Canlıya al düğmesinden sonra main'in gelistirme'ye yetişmesini izler (en çok 10 dk).
+function canliyiIzle() {
+  clearInterval(gelIzle);
+  const bas = Date.now();
+  gelIzle = setInterval(async () => {
+    await panelDurumu();
+    if (gelPanel && !gelPanel.yok && gelPanel.ileri === 0) {
+      clearInterval(gelIzle); gelIzle = null;
+      toast("Panel canlıya alındı: 1-2 dakika içinde yayında (Ctrl+F5 ile yenile).");
+      kayitEkle("Geliştirme: panel canlıya alındı");
+    } else if (Date.now() - bas > 600000) { clearInterval(gelIzle); gelIzle = null; }
+    if (sekme === "gelistirme") ciz();
+  }, 15000);
+}
+
+function gelistirmeCiz(ic) {
+  if (!gelPanel && !gelHata) { ic.innerHTML = '<div class="kart not">GitHub\'dan geliştirme durumu alınıyor...</div>'; panelDurumu().then(() => sekme === "gelistirme" && ciz()); return; }
+  const p = gelPanel || {};
+  const panelDurum = gelHata ? `<div class="gel-durum hata">${kacis(gelHata)}</div>`
+    : p.yok ? `<div class="gel-durum">GitHub'da henüz <b>gelistirme</b> dalı yok. "VS Code ile geliştir"e basınca oluşturulur.</div>`
+    : p.ileri ? `<div class="gel-durum hazir"><b>${p.ileri} yeni değişiklik</b> canlıya alınmayı bekliyor${p.geri ? ` · main'de gelistirme'de olmayan ${p.geri} değişiklik var (birleştirilir)` : ""}.</div>
+      <ul class="degisiklik">${p.kayitlar.map(k => `<li>${kacis(k.m)}<br><span>${kacis(k.kim)} · ${tarih(k.z)}</span></li>`).join("")}</ul>
+      ${p.dosyalar.length ? `<div class="not" style="margin-top:8px">Değişen dosyalar: ${p.dosyalar.slice(0, 12).map(kacis).join(", ")}${p.dosyalar.length > 12 ? ` (+${p.dosyalar.length - 12})` : ""}</div>` : ""}`
+    : `<div class="gel-durum guncel"><b>Canlı güncel:</b> gelistirme'de canlıya alınmamış değişiklik yok.</div>`;
+  ic.innerHTML = `
+    <div class="adimlar">
+      <div class="kart"><b>Geliştir</b>"VS Code ile geliştir": proje bilgisayarda yoksa GitHub'dan çekilir, gelistirme dalında açılır.</div>
+      <div class="kart"><b>Kaydet ve gönder</b>VS Code'da değişiklikleri kaydet (commit) ve gönder (Sync / Push).</div>
+      <div class="kart"><b>Önizle</b>Panel: yeni sekmede dener. Oyun: Unity'de açılır, Play ile dene.</div>
+      <div class="kart"><b>Canlıya al</b>Onaylayınca gelistirme main'e aktarılır. Oyunda istersen APK de derlenir.</div>
+    </div>
+    <div class="ayarlar">
+      <div class="kart"><div class="proje-bas"><h2>Yönetim paneli</h2><span class="bos"></span><button type="button" id="gYenile">↻</button></div>
+        ${panelDurum}
+        <div class="satirlar" style="margin-top:12px">
+          <button type="button" id="gPanelAc">VS Code ile geliştir</button>
+          <button type="button" id="gPanelOn" ${p.yok || gelHata ? "disabled" : ""}>Önizle</button>
+          <button type="button" class="ana" id="gPanelCanli" ${p.ileri ? "" : "disabled"}>Canlıya al</button>
+        </div>
+        ${gelIzle ? '<div class="not" style="margin-top:8px">Canlıya alma izleniyor: bilgisayarda açılan pencerede onayladıysan birazdan "canlı güncel" olur.</div>' : ""}
+      </div>
+      <div class="kart"><div class="proje-bas"><h2>Oyun</h2></div>
+        <div class="gel-durum">Oyun deposu gizli: değişiklikleri <a href="https://github.com/${OYUN_DEPO}/compare/main...gelistirme" target="_blank" rel="noopener">GitHub'da gör</a>
+          (GitHub'a giriş yapmış olmalısın). Canlıya alınca araç değişiklikleri listeler ve onay ister.</div>
+        <div class="satirlar" style="margin-top:12px">
+          <button type="button" id="gOyunAc">VS Code ile geliştir</button>
+          <button type="button" id="gOyunOn">Önizle (Unity)</button>
+          <button type="button" class="ana" id="gOyunCanli">Canlıya al</button>
+        </div>
+        <div class="not" style="margin-top:8px">Oyuncular yeni hâli yeni APK ile alır; her APK'da sürüm kodu (Yonetim.SurumKodu) bir artırılmalı.</div>
+      </div>
+      <div class="kart"><h2>Geliştirme Aracı (her bilgisayarda bir kez)</h2>
+        <div class="not">Düğmelerin çalışması için bilgisayarda bu küçük araç kurulu olmalı. Git girişini bilgisayardan kullanır (GitHub Desktop); panele şifre girilmez.
+          Gerekenler: GitHub Desktop (ya da Git), VS Code; oyun önizlemesi için Unity.</div>
+        <ol class="not" style="margin:10px 0;padding-left:18px">
+          <li>"Aracı indir"e bas, inen <b>kur.cmd</b>'yi çalıştır (Windows uyarı verirse: Ek bilgi → Yine de çalıştır).</li>
+          <li>"Aracı dene"ye bas; tarayıcı sorarsa "Aç"a bas. Açılan pencerede "Kurulum tamam" yazmalı.</li>
+        </ol>
+        <div class="satirlar"><a class="dugme" href="gelistirme/kur.cmd" download="kur.cmd">Aracı indir</a><button type="button" id="gDene">Aracı dene</button></div>
+      </div>
+    </div>`;
+  $("gYenile").onclick = () => { gelPanel = null; gelHata = ""; ciz(); };
+  $("gPanelAc").onclick = () => aracCagir("ac/panel");
+  $("gPanelOn").onclick = () => paneliOnizle();
+  $("gPanelCanli").onclick = () => { aracCagir("canli/panel", `Geliştirme: panel canlıya alma başlatıldı (${p.ileri} değişiklik)`); canliyiIzle(); ciz(); };
+  $("gOyunAc").onclick = () => aracCagir("ac/oyun");
+  $("gOyunOn").onclick = () => aracCagir("onizle/oyun");
+  $("gOyunCanli").onclick = () => aracCagir("canli/oyun", "Geliştirme: oyun canlıya alma başlatıldı");
+  $("gDene").onclick = () => aracCagir("dene");
 }
 
 // İşlem geçmişi: bütün yöneticilerin işlemleri, en yeni üstte.
