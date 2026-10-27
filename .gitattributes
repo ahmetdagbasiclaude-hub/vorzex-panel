@@ -1,0 +1,2 @@
+# Windows betikleri olduğu gibi (CRLF) saklansın: cmd.exe yalnız LF ile etiketleri yanlış okuyabilir.
+*.cmd -text
