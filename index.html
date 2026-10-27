@@ -18,6 +18,8 @@
                "yon_ayar"   {"duyuru": {"metin", "z", "bitis"}, "bakim": {"acik", "mesaj"}, "minSurum", "surumMesaj", "z"}
                             (en yeni "z" taşıyan geçerli)
                "yon_kayit"  [{"z", "t"}] işlem geçmişi (son 200)
+               "yon_hediye" {"<hediyeId>": {"o": oyuncuId, "e": elmas, "p": para, "n": not, "z", "y": veren}} (oyun bir kez alır;
+                            aldıklarını kendi "oy_hediye" kaydına virgüllü yazar: panel teslim edildi gösterir)
                "yon_yoneticiler" {"<kimlik>": {"ad", "k": kullanıcı adı, "z", "tam", "s": 1 çıkarıldı}} (ana hesap ve tam yetkililer)
   Oyun bunları 2 dk'da bir okur. Bu dosyada şifre ya da gizli anahtar yoktur.
 -->
@@ -238,15 +240,15 @@ a.dugme:hover { border-color: var(--mavi); text-decoration: none; }
 const PROJE = "afc217db-b47d-479e-b704-e2decc072e1e", ORTAM = "production";
 const AUTH = "https://player-auth.services.api.unity.com/v1/authentication/usernamepassword/";
 const SAVE = `https://cloud-save.services.api.unity.com/v1/data/projects/${PROJE}/players`;
-const ANAHTARLAR = ["oy_ad", "oy_no", "oy_sv", "oy_para", "oy_elmas", "oy_ilk", "oy_son", "oy_yer", "oy_hile", "oy_hile_not", "oy_surum", "oy_gunler", "oy_klan", "oy_sure"];
+const ANAHTARLAR = ["oy_ad", "oy_no", "oy_sv", "oy_para", "oy_elmas", "oy_ilk", "oy_son", "oy_yer", "oy_hile", "oy_hile_not", "oy_surum", "oy_gunler", "oy_klan", "oy_sure", "oy_hediye"];
 const CEVRIMICI_SN = 300, GUN_SN = 86400, TR = 3 * 3600; // gün numarası Türkiye saatine göre (oyunla aynı)
 
 // Ana hesap (yönetici ekleyip çıkarır) ve Unity editörü hesabı: oyundaki Yonetim.Yoneticiler ile aynı.
 const SAHIP = "4tI2VJEacbPQsD198kYXXh8GaX0y", EDITOR = "rWjBpXWd5BF9SWbJPFZIWPA4SYMR";
-const YON_ANAHTAR = ["yon_yasak", "yon_ayar", "yon_kayit"];
+const YON_ANAHTAR = ["yon_yasak", "yon_ayar", "yon_kayit", "yon_hediye"];
 
 let token = null, benId = null, oyuncular = [], yasaklar = {}, ayar = {}, sekme = "ozet", arama = "", baglanti = "hepsi", siralama = { alan: "son", ters: true };
-let yoneticiler = {}, benimListe = {}, benim = { yasak: {}, kayit: [] }, gecmis = [], yetkili = false;
+let yoneticiler = {}, benimListe = {}, benim = { yasak: {}, kayit: [], hediye: {} }, gecmis = [], yetkili = false, hediyeler = {};
 const tamYetkili = () => benId === SAHIP || !!(yoneticiler[benId] && yoneticiler[benId].tam);
 const $ = id => document.getElementById(id);
 const simdi = () => Math.floor(Date.now() / 1000);
@@ -388,7 +390,7 @@ function ozet(e) {
   const n = k => parseInt(d[k], 10) || 0;
   return { id: e.id, ad: d.oy_ad || "(adsız)", no: d.oy_no || "", sv: n("oy_sv"), para: n("oy_para"), elmas: n("oy_elmas"),
     ilk: n("oy_ilk"), son: n("oy_son"), yer: d.oy_yer || "", hile: n("oy_hile"), hileNot: d.oy_hile_not || "",
-    surum: n("oy_surum"), klan: d.oy_klan || "", sure: n("oy_sure"), gunler: String(d.oy_gunler || "").split(",").map(x => parseInt(x, 10)).filter(x => x > 0) };
+    surum: n("oy_surum"), klan: d.oy_klan || "", sure: n("oy_sure"), alinan: String(d.oy_hediye || "").split(",").filter(Boolean), gunler: String(d.oy_gunler || "").split(",").map(x => parseInt(x, 10)).filter(x => x > 0) };
 }
 
 // Yasak listesi: yeni biçim JSON nesnesi; eski biçim virgüllü kimlikler (kalıcı sayılır).
@@ -436,7 +438,7 @@ async function yonetimKaydiniOku() {
   yetkili = !!yoneticiler[benId];
   await Promise.all(Object.keys(yoneticiler).map(oku));
   benimListe = jsonCoz((kayitlar[benId] || {}).yon_yoneticiler) || {};
-  const birlesik = {}; let enYeniAyar = null; const g = [];
+  const birlesik = {}; let enYeniAyar = null; const g = []; const hd = {};
   for (const id of Object.keys(yoneticiler)) {
     const d = kayitlar[id] || {};
     for (const [oid, y] of Object.entries(yasakCoz(d.yon_yasak))) {
@@ -447,12 +449,14 @@ async function yonetimKaydiniOku() {
     if (a && (!enYeniAyar || (a.z || 0) > (enYeniAyar.z || 0))) enYeniAyar = a;
     const ad = (yoneticiler[id] && yoneticiler[id].ad) || id;
     for (const k of jsonCoz(d.yon_kayit) || []) g.push({ ...k, kim: ad });
+    for (const [hid, h] of Object.entries(jsonCoz(d.yon_hediye) || {})) hd[hid] = h;
   }
+  hediyeler = hd;
   yasaklar = birlesik;
   ayar = enYeniAyar || {};
   gecmis = g.sort((a, b) => b.z - a.z);
   const kendi = kayitlar[benId] || {};
-  benim = { yasak: yasakCoz(kendi.yon_yasak), kayit: jsonCoz(kendi.yon_kayit) || [] };
+  benim = { yasak: yasakCoz(kendi.yon_yasak), kayit: jsonCoz(kendi.yon_kayit) || [], hediye: jsonCoz(kendi.yon_hediye) || {} };
 }
 async function yaz(anahtar, deger) {
   await istek(`${SAVE}/${benId}/public/items`, { method: "POST", body: JSON.stringify({ key: anahtar, value: JSON.stringify(deger) }) });
@@ -464,6 +468,18 @@ async function kayitEkle(metin) {
   benim.kayit = [...benim.kayit, k].slice(-200);
   gecmis.unshift({ ...k, kim: benAd() });
   try { await yaz("yon_kayit", benim.kayit); } catch (e) { console.warn(e); }
+}
+
+// Hediye: kendi "yon_hediye" kaydına yeni kimlikle eklenir (60 günden eskiler temizlenir). Oyun en geç 2 dk içinde alır.
+async function hediyeGonder(p, elmas, para, not) {
+  await yonetimKaydiniOku();
+  const yeni = {};
+  for (const [k, v] of Object.entries(benim.hediye)) if (simdi() - (v.z || 0) < 60 * GUN_SN) yeni[k] = v;
+  const hid = simdi().toString(36) + Math.random().toString(36).slice(2, 7);
+  yeni[hid] = { o: p.id, e: elmas, p: para, n: not, z: simdi(), y: benAd() };
+  await yaz("yon_hediye", yeni);
+  benim.hediye = yeni; hediyeler[hid] = yeni[hid];
+  await kayitEkle(`Hediye: ${p.ad} (${p.no}) · ${elmas ? elmas + " elmas" : ""}${elmas && para ? " + " : ""}${para ? "₺ " + para : ""}${not ? " · " + not : ""}`);
 }
 
 // Yasak ya da kaldırma (kayit null): kendi kaydına en yeni kayıt olarak yazılır; başka yöneticinin yasağını da geçersiz kılar.
@@ -701,15 +717,42 @@ function detayAc(id) {
       <dt>Son 30 günde</dt><dd>${son30} gün oynadı</dd>
       <dt>Sürüm</dt><dd>${p.surum || "-"}</dd>
       <dt>Hile şüphesi</dt><dd class="${p.hile ? "hile" : ""}">${p.hile ? `${p.hile} olay · son: ${kacis(p.hileNot)}` : "yok"}</dd>
+      <dt>Hediyeler</dt><dd>${hediyeSatirlari(p)}</dd>
     </dl>
-    <div class="satirlar">${p.id === benId ? "" : y ? `<button type="button" id="yasakKaldir" class="ana">Yasağı kaldır</button>` : `<button type="button" id="yasakla" class="tehlike dolu">Yasakla...</button>`}</div>`;
+    <div class="satirlar"><button type="button" id="hediyeVer" class="ana">Elmas / para gönder...</button>${p.id === benId ? "" : y ? `<button type="button" id="yasakKaldir" class="ana">Yasağı kaldır</button>` : `<button type="button" id="yasakla" class="tehlike dolu">Yasakla...</button>`}</div>`;
   $("detayKapat").onclick = () => $("detay").close();
   if ($("yasakKaldir")) $("yasakKaldir").onclick = async () => {
     try { await yasakKaydet(p.id, null, `Yasak kaldırıldı: ${p.ad} (${p.no})`); toast(`${p.ad} yasağı kaldırıldı.`); } catch (e) { hataGoster("Yazılamadı: " + e.message); }
     $("detay").close(); ciz();
   };
   if ($("yasakla")) $("yasakla").onclick = () => { $("detay").close(); yasakDiyalogu(p); };
+  $("hediyeVer").onclick = () => { $("detay").close(); hediyeDiyalogu(p); };
   $("detay").showModal();
+}
+
+// Oyuncuya gönderilen hediyeler (en yeni üstte) ve teslim durumu.
+function hediyeSatirlari(p) {
+  const l = Object.entries(hediyeler).filter(([, h]) => h.o === p.id).sort((a, b) => b[1].z - a[1].z).slice(0, 8);
+  if (!l.length) return "-";
+  return l.map(([hid, h]) => `${tarih(h.z)} · ${h.e ? sayi(h.e) + " elmas" : ""}${h.e && h.p ? " + " : ""}${h.p ? "₺ " + sayi(h.p) : ""} · ${p.alinan.includes(hid) ? "teslim alındı" : "bekliyor (oyuna girince)"}${h.y ? " · " + kacis(h.y) : ""}`).join("<br>");
+}
+
+function hediyeDiyalogu(p) {
+  $("yasakForm").innerHTML = `<div class="ust"><h2>Gönder: ${kacis(p.ad)} <span class="no">${kacis(p.no)}</span></h2></div>
+    <label>Elmas<input id="hElmas" type="number" min="0" max="100000" step="1" value="300"></label>
+    <label>Para (₺)<input id="hPara" type="number" min="0" max="10000000" step="1" value="0"></label>
+    <label>Not (oyuncu görür)<input id="hNot" maxlength="80" placeholder="ör. Etkinlik ödülü"></label>
+    <div class="not">Oyuncu oyuna girince (en geç 2 dakika içinde) bir kez eklenir ve ekranda bildirim görür. 0.6.0 ve sonraki sürümler alır.</div>
+    <div class="satirlar"><button value="iptal">Vazgeç</button><button value="tamam" class="ana dolu">Gönder</button></div>`;
+  $("yasakDiyalog").onclose = async () => {
+    if ($("yasakDiyalog").returnValue !== "tamam") return;
+    const elmas = Math.max(0, Math.min(100000, parseInt($("hElmas").value, 10) || 0)), para = Math.max(0, Math.min(10000000, parseInt($("hPara").value, 10) || 0));
+    if (!elmas && !para) { hataGoster("Elmas ya da para gir."); return; }
+    try { await hediyeGonder(p, elmas, para, $("hNot").value.trim()); toast(`${p.ad}: gönderildi, oyuna girince alacak.`); } catch (e) { hataGoster("Gönderilemedi: " + e.message); }
+    ciz();
+  };
+  $("yasakDiyalog").returnValue = "";
+  $("yasakDiyalog").showModal();
 }
 
 function yasakDiyalogu(p) {
