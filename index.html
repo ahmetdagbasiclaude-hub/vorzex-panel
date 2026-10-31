@@ -745,7 +745,7 @@ function detayAc(id) {
       <dt>Hile şüphesi</dt><dd class="${p.hile ? "hile" : ""}">${p.hile ? `${p.hile} olay · son: ${kacis(p.hileNot)}` : "yok"}</dd>
       <dt>Hediyeler</dt><dd>${hediyeSatirlari(p)}</dd>
     </dl>
-    <div class="satirlar"><button type="button" id="hediyeVer" class="ana">Elmas / para gönder...</button>${p.id === benId ? "" : y ? `<button type="button" id="yasakKaldir" class="ana">Yasağı kaldır</button>` : `<button type="button" id="yasakla" class="tehlike dolu">Yasakla...</button>`}</div>`;
+    <div class="satirlar"><button type="button" id="hediyeVer" class="ana">Elmas / para gönder...</button>${tamYetkili() && p.id !== SAHIP && p.id !== EDITOR ? (yoneticiler[p.id] ? `<button type="button" id="oyunYonetici" class="tehlike">Yöneticilikten çıkar</button>` : `<button type="button" id="oyunYonetici" class="ana">Oyunda yönetici yap</button>`) : ""}${p.id === benId ? "" : y ? `<button type="button" id="yasakKaldir" class="ana">Yasağı kaldır</button>` : `<button type="button" id="yasakla" class="tehlike dolu">Yasakla...</button>`}</div>`;
   $("detayKapat").onclick = () => $("detay").close();
   if ($("yasakKaldir")) $("yasakKaldir").onclick = async () => {
     try { await yasakKaydet(p.id, null, `Yasak kaldırıldı: ${p.ad} (${p.no})`); toast(`${p.ad} yasağı kaldırıldı.`); } catch (e) { hataGoster("Yazılamadı: " + e.message); }
@@ -753,6 +753,17 @@ function detayAc(id) {
   };
   if ($("yasakla")) $("yasakla").onclick = () => { $("detay").close(); yasakDiyalogu(p); };
   $("hediyeVer").onclick = () => { $("detay").close(); hediyeDiyalogu(p); };
+  // Oyun hesabını yönetici yapar: oyunda ADMIN yazar, Menü > Oyuncular'dan hapse atar / banlar (panel hesabı açılmaz).
+  if ($("oyunYonetici")) $("oyunYonetici").onclick = async () => {
+    const cikar = !!yoneticiler[p.id];
+    if (!confirm(cikar ? `${p.ad} yöneticilikten çıkarılsın mı?` : `${p.ad} oyunda yönetici olsun mu? İsminde ADMIN yazar; oyuncuları hapse atabilir ve banlayabilir.`)) return;
+    try {
+      await yoneticiKaydet(p.id, cikar ? { ad: p.ad, k: "", s: 1 } : { ad: p.ad, k: "", tam: false, oyun: 1 },
+        cikar ? `Oyun yöneticiliği alındı: ${p.ad} (${p.no})` : `Oyunda yönetici yapıldı: ${p.ad} (${p.no})`);
+      toast(cikar ? `${p.ad} artık yönetici değil (oyunda 2 dk içinde).` : `${p.ad} yönetici oldu (oyunda 2 dk içinde ADMIN).`);
+    } catch (e) { hataGoster("Yazılamadı: " + e.message); }
+    $("detay").close(); ciz();
+  };
   $("detay").showModal();
 }
 
