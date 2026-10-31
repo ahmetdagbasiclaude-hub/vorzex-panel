@@ -240,7 +240,7 @@ a.dugme:hover { border-color: var(--mavi); text-decoration: none; }
 const PROJE = "afc217db-b47d-479e-b704-e2decc072e1e", ORTAM = "production";
 const AUTH = "https://player-auth.services.api.unity.com/v1/authentication/usernamepassword/";
 const SAVE = `https://cloud-save.services.api.unity.com/v1/data/projects/${PROJE}/players`;
-const ANAHTARLAR = ["oy_ad", "oy_no", "oy_sv", "oy_para", "oy_elmas", "oy_ilk", "oy_son", "oy_yer", "oy_hile", "oy_hile_not", "oy_surum", "oy_gunler", "oy_klan", "oy_sure", "oy_hediye"];
+const ANAHTARLAR = ["oy_ad", "oy_no", "oy_sv", "oy_para", "oy_elmas", "oy_ilk", "oy_son", "oy_yer", "oy_hile", "oy_hile_not", "oy_surum", "oy_gunler", "oy_klan", "oy_sure", "oy_hediye", "oy_bildiri"];
 const CEVRIMICI_SN = 300, GUN_SN = 86400, TR = 3 * 3600; // gün numarası Türkiye saatine göre (oyunla aynı)
 
 // Ana hesap (yönetici ekleyip çıkarır) ve Unity editörü hesabı: oyundaki Yonetim.Yoneticiler ile aynı.
@@ -384,13 +384,23 @@ async function yukle() {
   ciz();
 }
 
+// Oyuncunun oyun içinden yaptığı bildirimler (son 10): [{h: hedef kimliği, a: hedef adı, n: neden, z}].
+function bildiriCoz(v) {
+  try { const d = typeof v === "string" ? JSON.parse(v) : v; return Array.isArray(d) ? d.filter(b => b && b.h) : []; } catch { return []; }
+}
+function tumBildirimler() {
+  const l = [];
+  for (const p of oyuncular) for (const b of p.bildiri || []) l.push({ bildiren: p, hedefId: b.h, hedefAd: b.a || "?", neden: b.n || "", z: b.z || 0 });
+  return l.sort((a, b) => b.z - a.z);
+}
+
 function ozet(e) {
   const d = {};
   for (const o of e.data || []) d[o.key] = o.value;
   const n = k => parseInt(d[k], 10) || 0;
   return { id: e.id, ad: d.oy_ad || "(adsız)", no: d.oy_no || "", sv: n("oy_sv"), para: n("oy_para"), elmas: n("oy_elmas"),
     ilk: n("oy_ilk"), son: n("oy_son"), yer: d.oy_yer || "", hile: n("oy_hile"), hileNot: d.oy_hile_not || "",
-    surum: n("oy_surum"), klan: d.oy_klan || "", sure: n("oy_sure"), alinan: String(d.oy_hediye || "").split(",").filter(Boolean), gunler: String(d.oy_gunler || "").split(",").map(x => parseInt(x, 10)).filter(x => x > 0) };
+    surum: n("oy_surum"), klan: d.oy_klan || "", sure: n("oy_sure"), bildiri: bildiriCoz(d.oy_bildiri), alinan: String(d.oy_hediye || "").split(",").filter(Boolean), gunler: String(d.oy_gunler || "").split(",").map(x => parseInt(x, 10)).filter(x => x > 0) };
 }
 
 // Yasak listesi: yeni biçim JSON nesnesi; eski biçim virgüllü kimlikler (kalıcı sayılır).
@@ -515,11 +525,11 @@ async function yoneticiKaydet(id, kayit, not) {
 function hataGoster(m) { $("hataKutu").textContent = m; $("hataKutu").classList.toggle("gizli", !m); }
 
 // ---- Çizim ----
-const SEKMELER = [["ozet", "Özet"], ["oyuncular", "Oyuncular"], ["hile", "Hile şüphelileri"], ["yasakli", "Yasaklılar"], ["jeton", "Jeton (Elmas)"],
+const SEKMELER = [["ozet", "Özet"], ["oyuncular", "Oyuncular"], ["bildiri", "Bildirimler"], ["hile", "Hile şüphelileri"], ["yasakli", "Yasaklılar"], ["jeton", "Jeton (Elmas)"],
   ["ayar", "Duyuru · Bakım · Sürüm"], ["yonetici", "Yöneticiler"], ["gecmis", "İşlem geçmişi"], ["gelistirme", "Geliştirme"]];
 function sekmeleriCiz() {
   $("sekmeler").innerHTML = "";
-  const sayac = { hile: oyuncular.filter(p => p.hile > 0 && !yasagi(p.id)).length };
+  const sayac = { hile: oyuncular.filter(p => p.hile > 0 && !yasagi(p.id)).length, bildiri: tumBildirimler().filter(b => simdi() - b.z < 86400).length };
   for (const [k, ad] of SEKMELER) {
     if (k === "gelistirme" && !tamYetkili()) continue; // geliştirme yalnız tam yetkililerde
     const b = document.createElement("button");
@@ -546,12 +556,28 @@ function ciz() {
   if (sekme === "ayar") return ayarCiz(ic);
   if (sekme === "yonetici") return yoneticiCiz(ic);
   if (sekme === "gecmis") return gecmisCiz(ic);
+  if (sekme === "bildiri") return bildiriCiz(ic);
   if (sekme === "gelistirme") return tamYetkili() ? gelistirmeCiz(ic) : (ic.innerHTML = '<div class="kart not">Geliştirme için tam yetki gerekir.</div>');
   let liste = oyuncular, baslik = "";
   if (sekme === "hile") { liste = oyuncular.filter(p => p.hile > 0); baslik = `<div class="uyari">Oyunun kendi bildirdiği şüpheli olaylar (para kaydı/belleği değiştirilmiş, anormal hız, yöneticisiz uçuş). Kesin kanıt değildir: incele, sonra yasakla.</div>`; }
   if (sekme === "yasakli") { liste = oyuncular.filter(p => yasagi(p.id)); baslik = ""; }
   if (sekme === "jeton") { liste = oyuncular.filter(p => p.elmas > 0); baslik = `<div class="uyari">Jeton = Elmas. Gerçek parayla elmas satışı (Google Play faturalandırması) kurulunca kimin ne zaman kaç elmas aldığı burada listelenecek. Şimdilik elması olanlar:</div>`; }
   tabloCiz(ic, liste, baslik);
+}
+
+// Oyuncuların oyun içinden yaptığı bildirimler (küfür / hile / diğer); en yeni üstte. Hedefe tıklayınca detayı açılır
+// (oradan yasakla, elmas gönder). Hapis oyun içinden verilir (Menü > Oyuncular).
+function bildiriCiz(ic) {
+  const l = tumBildirimler();
+  const sayim = {};
+  for (const b of l) sayim[b.hedefId] = (sayim[b.hedefId] || 0) + 1;
+  ic.innerHTML = `<div class="uyari">Oyuncular oyunda Menü &gt; Oyuncular &gt; Bildir ile şikayet eder; haritadaki yöneticiler anında görür. Hapis oyun içinden verilir; yasaklamak için hedefe tıkla.</div>
+    <div class="kart"><div class="tablo-kap"><table><thead><tr><th>Zaman</th><th>Bildiren</th><th>Bildirilen</th><th>Neden</th><th>Toplam</th></tr></thead><tbody>
+    ${l.length ? l.map(b => `<tr data-id="${kacis(b.hedefId)}"><td>${tarih(b.z)}</td><td>${kacis(b.bildiren.ad)} <span class="no">${kacis(b.bildiren.no)}</span></td>
+      <td><b>${kacis(b.hedefAd)}</b>${yasagi(b.hedefId) ? ' <span class="no">yasaklı</span>' : ""}</td><td>${kacis(b.neden)}</td><td>${sayim[b.hedefId]}</td></tr>`).join("")
+      : '<tr><td colspan="5" class="not">Henüz bildirim yok.</td></tr>'}
+    </tbody></table></div></div>`;
+  ic.querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = () => { if (oyuncular.some(p => p.id === tr.dataset.id)) detayAc(tr.dataset.id); else toast("Bu oyuncunun kaydı listede yok (eski sürüm)."); });
 }
 
 function ozetCiz(ic) {
